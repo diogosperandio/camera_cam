@@ -385,4 +385,157 @@ void main() {
       expect(messages, contains('Exclusão falhou'));
     });
   });
+
+  group('countFiles', () {
+    for (final entry in <(String, int)>[('0', 0), ('12', 12), (' 3\n', 3)]) {
+      test('parses "${entry.$1.replaceAll('\n', r'\n')}"', () async {
+        final client = CardClient(
+          'http://flashair',
+          MockClient((request) async {
+            expect(request.url.queryParameters['op'], '101');
+            expect(request.url.queryParameters['DIR'], '/DCIM/EMPTY');
+            return http.Response(entry.$1, 200);
+          }),
+        );
+
+        expect(await client.countFiles('/DCIM/EMPTY'), entry.$2);
+      });
+    }
+
+    test('rejects an invalid response body', () async {
+      final client = CardClient(
+        'http://flashair',
+        MockClient((_) async => http.Response('not-a-number', 200)),
+      );
+
+      expect(
+        client.countFiles('/DCIM/EMPTY'),
+        throwsA(isA<CardParseException>()),
+      );
+    });
+  });
+
+  group('deleteEmptyFolder', () {
+    test('rejects root and /DCIM without making a request', () async {
+      var requests = 0;
+      final client = CardClient(
+        'http://flashair',
+        MockClient((_) async {
+          requests++;
+          return http.Response('', 200);
+        }),
+      );
+
+      expect(() => client.deleteEmptyFolder('/'), throwsArgumentError);
+      expect(() => client.deleteEmptyFolder('/DCIM'), throwsArgumentError);
+      expect(requests, 0);
+    });
+
+    test('does not send DEL when listDir contains an item', () async {
+      final urls = <String>[];
+      final client = CardClient(
+        'http://flashair',
+        MockClient((request) async {
+          urls.add(request.url.toString());
+          return http.Response(
+            'WLANSD_FILELIST\n/DCIM/EMPTY,PHOTO.JPG,1,32,0,0\n',
+            200,
+          );
+        }),
+      );
+
+      await expectLater(
+        client.deleteEmptyFolder('/DCIM/EMPTY'),
+        throwsA(
+          isA<FolderNotEmptyException>().having(
+            (error) => error.count,
+            'count',
+            1,
+          ),
+        ),
+      );
+      expect(urls.where((url) => url.contains('DEL=')), isEmpty);
+    });
+
+    test('does not send DEL when countFiles is greater than zero', () async {
+      final urls = <String>[];
+      final client = CardClient(
+        'http://flashair',
+        MockClient((request) async {
+          urls.add(request.url.toString());
+          if (request.url.queryParameters['op'] == '100') {
+            return http.Response('WLANSD_FILELIST\n', 200);
+          }
+          return http.Response('2', 200);
+        }),
+      );
+
+      await expectLater(
+        client.deleteEmptyFolder('/DCIM/EMPTY'),
+        throwsA(isA<FolderNotEmptyException>()),
+      );
+      expect(urls.where((url) => url.contains('DEL=')), isEmpty);
+    });
+
+    test('checks twice and sends WRITEPROTECT before DEL', () async {
+      final urls = <String>[];
+      final client = CardClient(
+        'http://flashair',
+        MockClient((request) async {
+          urls.add(request.url.toString());
+          if (request.url.queryParameters['op'] == '100') {
+            return http.Response('WLANSD_FILELIST\n', 200);
+          }
+          if (request.url.queryParameters['op'] == '101') {
+            return http.Response('0', 200);
+          }
+          return http.Response('SUCCESS', 200);
+        }),
+      );
+
+      await client.deleteEmptyFolder('/DCIM/EMPTY');
+
+      expect(urls, <String>[
+        'http://flashair/command.cgi?op=100&DIR=/DCIM/EMPTY',
+        'http://flashair/command.cgi?op=101&DIR=/DCIM/EMPTY',
+        'http://flashair/upload.cgi?WRITEPROTECT=ON',
+        'http://flashair/upload.cgi?DEL=/DCIM/EMPTY',
+      ]);
+    });
+
+    test('turns ERROR into CardDeleteException', () async {
+      final client = CardClient(
+        'http://flashair',
+        MockClient((request) async {
+          if (request.url.queryParameters['op'] == '100') {
+            return http.Response('WLANSD_FILELIST\n', 200);
+          }
+          if (request.url.queryParameters['op'] == '101') {
+            return http.Response('0', 200);
+          }
+          if (request.url.queryParameters.containsKey('WRITEPROTECT')) {
+            return http.Response('SUCCESS', 200);
+          }
+          return http.Response('ERROR', 200);
+        }),
+      );
+
+      expect(
+        client.deleteEmptyFolder('/DCIM/EMPTY'),
+        throwsA(isA<CardDeleteException>()),
+      );
+    });
+
+    test('turns a network error into CardUnreachableException', () async {
+      final client = CardClient(
+        'http://flashair',
+        MockClient((_) async => throw http.ClientException('offline')),
+      );
+
+      expect(
+        client.deleteEmptyFolder('/DCIM/EMPTY'),
+        throwsA(isA<CardUnreachableException>()),
+      );
+    });
+  });
 }

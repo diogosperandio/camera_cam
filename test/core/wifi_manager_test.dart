@@ -79,4 +79,63 @@ Nome da rede 2 : Casa
       expect(parseNetshInterfaces(output), isNull);
     });
   });
+
+  group('adapter state parsers', () {
+    test('parses nmcli radio output in English and Portuguese', () {
+      expect(parseNmcliRadioState('enabled\n'), WifiAdapterState.enabled);
+      expect(parseNmcliRadioState('desativado\n'), WifiAdapterState.disabled);
+      expect(parseNmcliRadioState('unexpected'), WifiAdapterState.unknown);
+    });
+
+    test('detects a Wi-Fi device and a hard rfkill block', () {
+      expect(parseNmcliHasWifiDevice('ethernet\nwifi\n'), isTrue);
+      expect(parseNmcliHasWifiDevice('ethernet\nloopback\n'), isFalse);
+      expect(
+        parseRfkillHardBlocked('Soft blocked: no\nHard blocked: yes\n'),
+        isTrue,
+      );
+      expect(
+        parseRfkillHardBlocked('Bloqueio leve: não\nHard blocked: sim\n'),
+        isTrue,
+      );
+      expect(
+        parseRfkillHardBlocked('Soft blocked: no\nHard blocked: no\n'),
+        isFalse,
+      );
+    });
+
+    test('parses Windows radio and netsh output', () {
+      expect(parsePowerShellWifiRadio('WiFi|On\r\n'), WifiAdapterState.enabled);
+      expect(
+        parsePowerShellWifiRadio('WiFi|Off\r\n'),
+        WifiAdapterState.disabled,
+      );
+
+      const english = '''
+Admin State    State          Type             Interface Name
+-------------------------------------------------------------------------
+Enabled        Disconnected   Dedicated        Wi-Fi
+''';
+      const portuguese = '''
+Estado Admin   Estado         Tipo             Nome da Interface
+-------------------------------------------------------------------------
+Desabilitado   Desconectado   Dedicado         Rede sem fio
+''';
+      expect(parseNetshAdapterState(english), WifiAdapterState.enabled);
+      expect(parseNetshWifiInterfaceName(english), 'Wi-Fi');
+      expect(parseNetshAdapterState(portuguese), WifiAdapterState.disabled);
+      expect(parseNetshWifiInterfaceName(portuguese), 'Rede sem fio');
+    });
+
+    test('recognizes Windows output without a wireless adapter', () {
+      expect(
+        parseNetshAdapterState('There is no wireless interface on the system.'),
+        WifiAdapterState.unavailable,
+      );
+      expect(
+        parseNetshAdapterState('Não há nenhuma interface sem fio no sistema.'),
+        WifiAdapterState.unavailable,
+      );
+    });
+  });
 }

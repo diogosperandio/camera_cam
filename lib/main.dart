@@ -8,6 +8,7 @@ import 'package:camera_cam/core/log_service.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/state/app_state.dart';
 import 'package:camera_cam/ui/main_page.dart';
+import 'package:camera_cam/ui/user_prompter.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -19,21 +20,24 @@ Future<void> main() async {
   } catch (error) {
     debugPrint('Não foi possível iniciar o log em arquivo: $error');
   }
+  final navigatorKey = GlobalKey<NavigatorState>();
   final state = AppState(
     configService: ConfigService(),
     wifiManager: WifiManager(),
     cardClient: CardClient('http://flashair', http.Client()),
     cacheService: CacheService(),
     fileSaver: FileSelectorFileSaver(),
+    userPrompter: DialogUserPrompter(navigatorKey),
   );
-  runApp(CameraCamApp(appState: state));
+  runApp(CameraCamApp(appState: state, navigatorKey: navigatorKey));
   unawaited(state.init());
 }
 
 class CameraCamApp extends StatefulWidget {
-  const CameraCamApp({required this.appState, super.key});
+  const CameraCamApp({required this.appState, this.navigatorKey, super.key});
 
   final AppState appState;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   State<CameraCamApp> createState() => _CameraCamAppState();
@@ -68,6 +72,8 @@ class _CameraCamAppState extends State<CameraCamApp> {
     return ChangeNotifierProvider<AppState>.value(
       value: widget.appState,
       child: MaterialApp(
+        navigatorKey: widget.navigatorKey,
+        debugShowCheckedModeBanner: false,
         title: 'EZ Share Viewer',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),

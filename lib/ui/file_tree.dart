@@ -4,6 +4,8 @@ import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/models/app_config.dart';
 import 'package:camera_cam/models/card_item.dart';
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/ui/app_snackbar.dart';
+import 'package:camera_cam/ui/empty_folders_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
@@ -81,6 +83,22 @@ class _FileTreeState extends State<FileTree> {
                       ),
                     ),
                   ),
+                  if (state.config.deleteEnabled)
+                    PopupMenuButton<String>(
+                      enabled: state.canDeleteFolders,
+                      tooltip: state.canDeleteFolders
+                          ? 'Mais opções'
+                          : _folderDeleteDisabledReason(state),
+                      icon: const Icon(Icons.more_vert),
+                      onSelected: (_) =>
+                          unawaited(showEmptyFoldersDialog(context, state)),
+                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                        PopupMenuItem<String>(
+                          value: 'clean-empty-folders',
+                          child: Text('Limpar pastas vazias…'),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -130,12 +148,19 @@ class _FileTreeState extends State<FileTree> {
     final fileCount = children?.where((child) => !child.isDir).length;
     final isLoading = state.loadingPaths.contains(item.fullPath);
     final isExpanded = state.expandedPaths.contains(item.fullPath);
+    final canOfferFolderDeletion =
+        item.isDir && children != null && children.isEmpty;
 
     return Material(
       color: selected
           ? Theme.of(context).colorScheme.primaryContainer
           : Colors.transparent,
       child: InkWell(
+        onSecondaryTapDown: state.config.deleteEnabled && canOfferFolderDeletion
+            ? (details) => unawaited(
+                _showFolderContextMenu(context, state, item, details),
+              )
+            : null,
         onTap: () {
           _focusNode.requestFocus();
           setState(() => _activePath = item.fullPath);
@@ -185,7 +210,14 @@ class _FileTreeState extends State<FileTree> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (item.isDir && fileCount != null)
+                    if (item.isDir && children != null && children.isEmpty)
+                      Text(
+                        'vazia',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      )
+                    else if (item.isDir && fileCount != null)
                       Text(
                         '$fileCount arquivo${fileCount == 1 ? '' : 's'}',
                         style: Theme.of(context).textTheme.bodySmall,
@@ -198,6 +230,19 @@ class _FileTreeState extends State<FileTree> {
                   ],
                 ),
               ),
+              if (state.config.deleteEnabled && canOfferFolderDeletion)
+                IconButton(
+                  onPressed: state.canDeleteFolders
+                      ? () => unawaited(
+                          _requestDeleteFolder(context, state, item),
+                        )
+                      : null,
+                  tooltip: state.canDeleteFolders
+                      ? 'Apagar pasta vazia'
+                      : _folderDeleteDisabledReason(state),
+                  icon: const Icon(Icons.delete_outline),
+                  color: Theme.of(context).colorScheme.error,
+                ),
             ],
           ),
         ),
@@ -249,6 +294,12 @@ class _FileTreeState extends State<FileTree> {
       _activateRow(state, current, activate: true);
       return KeyEventResult.handled;
     }
+    if (event.logicalKey == LogicalKeyboardKey.delete &&
+        current.item.isDir &&
+        state.config.deleteEnabled) {
+      unawaited(_requestDeleteFolder(context, state, current.item));
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
         current.item.isDir &&
         !state.expandedPaths.contains(current.item.fullPath)) {
@@ -285,6 +336,99 @@ class _FileTreeState extends State<FileTree> {
       }
     } else if (activate || selectFile) {
       unawaited(state.selectFile(row.item));
+    }
+  }
+
+  Future<void> _showFolderContextMenu(
+    BuildContext context,
+    AppState state,
+    CardItem folder,
+    TapDownDetails details,
+  ) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(details.globalPosition, details.globalPosition),
+        Offset.zero & overlay.size,
+      ),
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'delete-empty-folder',
+          enabled: state.canDeleteFolders,
+          child: const ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.delete_outline),
+            title: Text('Apagar pasta vazia'),
+          ),
+        ),
+      ],
+    );
+    if (selected == 'delete-empty-folder' && context.mounted) {
+      await _requestDeleteFolder(context, state, folder);
+    }
+  }
+
+  Future<void> _requestDeleteFolder(
+    BuildContext context,
+    AppState state,
+    CardItem folder,
+  ) async {
+    if (!state.canDeleteFolders || !folder.isDir) {
+      return;
+    }
+    if (!state.tree.containsKey(folder.fullPath)) {
+      final loaded = await state.loadDir(folder.fullPath);
+      if (!loaded || !context.mounted) {
+        return;
+      }
+    }
+    final count = state.tree[folder.fullPath]?.length ?? 0;
+    if (count != 0) {
+      showAppSnackBar(
+        context,
+        'Esta pasta não está vazia ($count arquivos). Só é possível apagar '
+        'pastas vazias.',
+        isError: true,
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Apagar pasta vazia'),
+        content: Text(
+          'Apagar a pasta vazia ${folder.name} do cartão? Esta ação não pode '
+          'ser desfeita.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          Tooltip(
+            message: state.canDeleteFolders
+                ? 'Apagar pasta vazia'
+                : _folderDeleteDisabledReason(state),
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              onPressed: state.canDeleteFolders
+                  ? () => Navigator.of(context).pop(true)
+                  : null,
+              child: const Text('Apagar'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await state.deleteFolder(folder);
     }
   }
 }
@@ -463,6 +607,19 @@ List<_TreeRow> _flattenTree(AppState state) {
 bool _supportsThumbnail(CardItem item) {
   final name = item.name.toLowerCase();
   return !item.isDir && (name.endsWith('.jpg') || name.endsWith('.jpeg'));
+}
+
+String _folderDeleteDisabledReason(AppState state) {
+  if (!state.config.deleteEnabled) {
+    return 'Ative a exclusão nas configurações.';
+  }
+  if (state.uploadEnabled != true) {
+    return 'O cartão precisa estar configurado com UPLOAD=1.';
+  }
+  if (state.connection != ConnectionStatus.connected) {
+    return 'Conecte ao cartão para apagar pastas vazias.';
+  }
+  return 'Aguarde a operação atual terminar.';
 }
 
 String formatFileSize(int bytes) {

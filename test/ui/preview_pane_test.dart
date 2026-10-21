@@ -180,6 +180,12 @@ class _Fixture {
 }
 
 class _FakeCardClient implements CardClient {
+  @override
+  Future<int> countFiles(String dir) async => 0;
+
+  @override
+  Future<void> deleteEmptyFolder(String path) async {}
+
   List<String> events = <String>[];
   final List<String> requestLog = <String>[];
   final List<String> deletedPaths = <String>[];
@@ -291,6 +297,12 @@ class _FakeConfigService implements ConfigService {
 }
 
 class _FakeWifiManager implements WifiManager {
+  @override
+  Future<WifiAdapterState> adapterState() async => WifiAdapterState.enabled;
+
+  @override
+  Future<void> enableAdapter() async {}
+
   @override
   Future<void> connect(String ssid) async {}
 

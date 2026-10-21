@@ -53,6 +53,11 @@ void main() {
     await tester.tap(
       find.widgetWithText(SwitchListTile, 'Desconectar ao fechar o app'),
     );
+    final sliderFinder = find.byType(Slider);
+    await tester.ensureVisible(sliderFinder);
+    tester.widget<Slider>(sliderFinder).onChanged?.call(5);
+    await tester.pump();
+    expect(fixture.state.config.snackBarSeconds, 5);
     await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
     await tester.pumpAndSettle();
 
@@ -60,6 +65,7 @@ void main() {
     expect(fixture.configService.saved?.baseUrl, 'http://192.168.0.1');
     expect(fixture.configService.saved?.disconnectOnClose, isFalse);
     expect(fixture.configService.saved?.deleteEnabled, isFalse);
+    expect(fixture.configService.saved?.snackBarSeconds, 5);
   });
 
   testWidgets('requires confirmation before enabling deletion', (tester) async {
@@ -175,6 +181,12 @@ class _FakeConfigService implements ConfigService {
 
 class _FakeWifiManager implements WifiManager {
   int listCalls = 0;
+
+  @override
+  Future<WifiAdapterState> adapterState() async => WifiAdapterState.enabled;
+
+  @override
+  Future<void> enableAdapter() async {}
 
   @override
   Future<void> connect(String ssid) async {}

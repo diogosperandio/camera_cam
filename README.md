@@ -15,3 +15,14 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Apagar pastas vazias
+
+A exclusão precisa estar habilitada nas Configurações do aplicativo e o cartão
+FlashAir deve estar configurado com `UPLOAD=1` em `SD_WLAN/CONFIG`. O aplicativo
+apaga somente pastas confirmadas como vazias imediatamente antes da operação;
+as pastas `/` e `/DCIM` nunca são removidas.
+
+Antes de confirmar, confira as pastas selecionadas. A exclusão é irreversível e,
+se a câmera não reconhecer o cartão depois da operação, desligue-a e ligue-a
+novamente.

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/file_tree.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -33,22 +34,32 @@ class _SettingsDialogState extends State<SettingsDialog> {
   bool _clearingCache = false;
   int? _cacheSize;
   bool _saving = false;
+  late final int _initialSnackBarSeconds;
+  late int _snackBarSeconds;
+  bool _settingsSaved = false;
+  late final AppState _appState;
 
   @override
   void initState() {
     super.initState();
-    final config = context.read<AppState>().config;
+    _appState = context.read<AppState>();
+    final config = _appState.config;
     _ssidController = TextEditingController(text: config.ssid ?? '');
     _baseUrlController = TextEditingController(text: config.baseUrl);
     _outputDirController = TextEditingController(text: config.outputDir ?? '');
     _disconnectOnClose = config.disconnectOnClose;
     _deleteEnabled = config.deleteEnabled;
     _deleteConfirmed = config.deleteEnabled;
+    _initialSnackBarSeconds = config.snackBarSeconds;
+    _snackBarSeconds = config.snackBarSeconds;
     unawaited(_loadCacheSize());
   }
 
   @override
   void dispose() {
+    if (!_settingsSaved) {
+      _appState.previewSnackBarSeconds(_initialSnackBarSeconds);
+    }
     _ssidController.dispose();
     _baseUrlController.dispose();
     _outputDirController.dispose();
@@ -191,6 +202,42 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   },
                 ),
                 const Divider(),
+                Text(
+                  'Duração das mensagens (segundos): $_snackBarSeconds',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Row(
+                  children: <Widget>[
+                    const Text('3 s'),
+                    Expanded(
+                      child: Slider(
+                        value: _snackBarSeconds.toDouble(),
+                        min: 3,
+                        max: 60,
+                        divisions: 57,
+                        label: '$_snackBarSeconds s',
+                        onChanged: (value) {
+                          final seconds = value.round();
+                          setState(() => _snackBarSeconds = seconds);
+                          context.read<AppState>().previewSnackBarSeconds(
+                            seconds,
+                          );
+                        },
+                      ),
+                    ),
+                    const Text('60 s'),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () => showAppSnackBar(
+                        context,
+                        'Esta mensagem ficará visível por '
+                        '$_snackBarSeconds segundos.',
+                      ),
+                      child: const Text('Testar'),
+                    ),
+                  ],
+                ),
+                const Divider(),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Permitir apagar fotos do cartão'),
@@ -258,7 +305,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       ),
       actions: <Widget>[
         TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          onPressed: _saving ? null : _cancel,
           child: const Text('Cancelar'),
         ),
         FilledButton(
@@ -400,16 +447,24 @@ class _SettingsDialogState extends State<SettingsDialog> {
         outputDir: outputDir.isEmpty ? null : outputDir,
         disconnectOnClose: _disconnectOnClose,
         deleteEnabled: _deleteEnabled,
+        snackBarSeconds: _snackBarSeconds,
       ),
     );
     if (!mounted) {
       return;
     }
     if (saved) {
+      _settingsSaved = true;
       Navigator.of(context).pop();
     } else {
       setState(() => _saving = false);
     }
+  }
+
+  void _cancel() {
+    context.read<AppState>().previewSnackBarSeconds(_initialSnackBarSeconds);
+    _settingsSaved = true;
+    Navigator.of(context).pop();
   }
 }
 

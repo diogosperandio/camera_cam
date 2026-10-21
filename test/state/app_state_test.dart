@@ -6,6 +6,7 @@ import 'package:camera_cam/core/cache_service.dart';
 import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/core/config_service.dart';
 import 'package:camera_cam/core/file_saver.dart';
+import 'package:camera_cam/core/user_prompter.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/models/app_config.dart';
 import 'package:camera_cam/models/card_item.dart';
@@ -40,6 +41,7 @@ void main() {
         expect(state.uploadEnabled, uploadResult);
         expect(state.tree['/'], isEmpty);
         expect(dependencies.wifi.connectedSsids, <String>['FlashAir']);
+        expect(dependencies.prompter.calls, 0);
       });
     }
 
@@ -75,6 +77,87 @@ void main() {
       expect(state.connection, ConnectionStatus.error);
       expect(state.errorMessage, contains('cartão não respondeu'));
       expect(state.errorMessage, isNot(contains('Falha ao conectar ao Wi-Fi')));
+    });
+
+    test('enables a disabled adapter after confirmation', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(ssid: 'FlashAir'),
+      );
+      dependencies.wifi.state = WifiAdapterState.disabled;
+      dependencies.prompter.answer = true;
+      dependencies.card.directories['/'] = <CardItem>[];
+      final state = dependencies.createState();
+
+      await state.init();
+      await state.connect();
+
+      expect(dependencies.prompter.calls, 1);
+      expect(dependencies.wifi.enableCalls, 1);
+      expect(state.connection, ConnectionStatus.connected);
+    });
+
+    test('keeps disconnected when enabling Wi-Fi is declined', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(ssid: 'FlashAir'),
+      );
+      dependencies.wifi.state = WifiAdapterState.disabled;
+      final state = dependencies.createState();
+
+      await state.init();
+      await state.connect();
+
+      expect(state.connection, ConnectionStatus.disconnected);
+      expect(state.noticeMessage, contains('Conexão cancelada'));
+      expect(state.errorMessage, isNull);
+      expect(dependencies.wifi.enableCalls, 0);
+      expect(dependencies.wifi.connectedSsids, isEmpty);
+    });
+
+    test('reports a hardware-blocked adapter without prompting', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(ssid: 'FlashAir'),
+      );
+      dependencies.wifi.state = WifiAdapterState.blocked;
+      final state = dependencies.createState();
+
+      await state.init();
+      await state.connect();
+
+      expect(state.connection, ConnectionStatus.error);
+      expect(state.errorMessage, contains('bloqueado por hardware'));
+      expect(dependencies.prompter.calls, 0);
+    });
+
+    test('reports an unavailable adapter', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(ssid: 'FlashAir'),
+      );
+      dependencies.wifi.state = WifiAdapterState.unavailable;
+      final state = dependencies.createState();
+
+      await state.init();
+      await state.connect();
+
+      expect(state.connection, ConnectionStatus.error);
+      expect(state.errorMessage, contains('não tem adaptador Wi-Fi'));
+      expect(dependencies.prompter.calls, 0);
+    });
+
+    test('reports failure while enabling the adapter', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(ssid: 'FlashAir'),
+      );
+      dependencies.wifi.state = WifiAdapterState.disabled;
+      dependencies.wifi.enableError = const WifiException('acesso negado');
+      dependencies.prompter.answer = true;
+      final state = dependencies.createState();
+
+      await state.init();
+      await state.connect();
+
+      expect(state.connection, ConnectionStatus.error);
+      expect(state.errorMessage, contains('acesso negado'));
+      expect(dependencies.wifi.connectedSsids, isEmpty);
     });
   });
 
@@ -152,6 +235,204 @@ void main() {
     expect(state.canDelete, isFalse);
     state.deleting = false;
     expect(state.canDelete, isTrue);
+  });
+
+  test('canDeleteFolders reflects deletion safety conditions', () {
+    final state = _Dependencies().createState()
+      ..connection = ConnectionStatus.connected
+      ..uploadEnabled = true;
+
+    state.config = const AppConfig(deleteEnabled: false);
+    expect(state.canDeleteFolders, isFalse);
+    state.config = const AppConfig(deleteEnabled: true);
+    state.uploadEnabled = false;
+    expect(state.canDeleteFolders, isFalse);
+    state.uploadEnabled = null;
+    expect(state.canDeleteFolders, isFalse);
+    state.uploadEnabled = true;
+    expect(state.canDeleteFolders, isTrue);
+    state.scanningFolders = true;
+    expect(state.canDeleteFolders, isFalse);
+  });
+
+  test(
+    'scanEmptyFolders finds empty folders with at most two counts',
+    () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(deleteEnabled: true),
+      );
+      const folders = <CardItem>[
+        CardItem(name: 'A', parentPath: '/DCIM', size: 0, isDir: true),
+        CardItem(name: 'B', parentPath: '/DCIM', size: 0, isDir: true),
+        CardItem(name: 'C', parentPath: '/DCIM', size: 0, isDir: true),
+      ];
+      dependencies.card.fileCounts.addAll(<String, int>{
+        '/DCIM/A': 0,
+        '/DCIM/B': 2,
+        '/DCIM/C': 0,
+      });
+      dependencies.card.countRelease = Completer<void>();
+      final state = dependencies.createState()
+        ..config = const AppConfig(deleteEnabled: true)
+        ..connection = ConnectionStatus.connected
+        ..uploadEnabled = true
+        ..tree['/DCIM'] = folders;
+
+      final scan = state.scanEmptyFolders();
+      await Future<void>.delayed(Duration.zero);
+      expect(dependencies.card.maximumCountInFlight, 2);
+      dependencies.card.countRelease!.complete();
+      final result = await scan;
+
+      expect(result.map((folder) => folder.name), <String>['A', 'C']);
+      expect(state.emptyFolders, result);
+      expect(state.scanProgress, (done: 3, total: 3));
+    },
+  );
+
+  test('deleteFolder updates tree, expansion and selection', () async {
+    final dependencies = _Dependencies(
+      config: const AppConfig(deleteEnabled: true),
+    );
+    const folder = CardItem(
+      name: 'EMPTY',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    const selected = CardItem(
+      name: 'OLD.JPG',
+      parentPath: '/DCIM/EMPTY',
+      size: 1,
+      isDir: false,
+    );
+    dependencies.card.directories['/DCIM'] = <CardItem>[folder];
+    dependencies.card.fileCounts[folder.fullPath] = 0;
+    final state = dependencies.createState()
+      ..config = const AppConfig(deleteEnabled: true)
+      ..connection = ConnectionStatus.connected
+      ..uploadEnabled = true
+      ..tree['/DCIM'] = <CardItem>[folder]
+      ..tree[folder.fullPath] = <CardItem>[]
+      ..expandedPaths.add(folder.fullPath)
+      ..selected = selected
+      ..previewBytes = Uint8List.fromList(<int>[1]);
+
+    expect(await state.deleteFolder(folder), isTrue);
+
+    expect(state.tree['/DCIM'], isEmpty);
+    expect(state.tree.containsKey(folder.fullPath), isFalse);
+    expect(state.expandedPaths, isNot(contains(folder.fullPath)));
+    expect(state.selected, isNull);
+    expect(state.previewBytes, isNull);
+  });
+
+  test('deleteFolder reports when the folder is no longer empty', () async {
+    final dependencies = _Dependencies(
+      config: const AppConfig(deleteEnabled: true),
+    );
+    const folder = CardItem(
+      name: 'CHANGED',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    dependencies.card.fileCounts[folder.fullPath] = 2;
+    final state = dependencies.createState()
+      ..config = const AppConfig(deleteEnabled: true)
+      ..connection = ConnectionStatus.connected
+      ..uploadEnabled = true;
+
+    expect(await state.deleteFolder(folder), isFalse);
+
+    expect(state.errorMessage, contains('2 arquivos'));
+    expect(dependencies.card.deletedFolderPaths, isEmpty);
+  });
+
+  test('scanEmptyFolders can be cancelled', () async {
+    final dependencies = _Dependencies(
+      config: const AppConfig(deleteEnabled: true),
+    );
+    const folder = CardItem(
+      name: 'WAIT',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    dependencies.card.countRelease = Completer<void>();
+    final state = dependencies.createState()
+      ..config = const AppConfig(deleteEnabled: true)
+      ..connection = ConnectionStatus.connected
+      ..uploadEnabled = true
+      ..tree['/DCIM'] = <CardItem>[folder];
+    final token = CancelToken();
+
+    final scan = state.scanEmptyFolders(cancel: token);
+    await Future<void>.delayed(Duration.zero);
+    token.cancel();
+    dependencies.card.countRelease!.complete();
+
+    expect(await scan, isEmpty);
+    expect(state.scanningFolders, isFalse);
+    expect(state.emptyFolders, isEmpty);
+  });
+
+  test(
+    'deleteEmptyFolders skips non-empty and continues after failure',
+    () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(deleteEnabled: true),
+      );
+      const folders = <CardItem>[
+        CardItem(name: 'A', parentPath: '/DCIM', size: 0, isDir: true),
+        CardItem(name: 'B', parentPath: '/DCIM', size: 0, isDir: true),
+        CardItem(name: 'C', parentPath: '/DCIM', size: 0, isDir: true),
+      ];
+      dependencies.card.directories['/DCIM'] = List<CardItem>.of(folders);
+      dependencies.card.fileCounts['/DCIM/A'] = 1;
+      dependencies.card.folderDeleteErrors['/DCIM/B'] = CardDeleteException(
+        statusCode: 500,
+        body: 'ERROR',
+      );
+      final state = dependencies.createState()
+        ..config = const AppConfig(deleteEnabled: true)
+        ..connection = ConnectionStatus.connected
+        ..uploadEnabled = true
+        ..tree['/DCIM'] = List<CardItem>.of(folders);
+
+      final summary = await state.deleteEmptyFolders(folders);
+
+      expect(summary.deleted.map((folder) => folder.name), <String>['C']);
+      expect(summary.skipped.map((folder) => folder.name), <String>['A']);
+      expect(summary.failures.keys.map((folder) => folder.name), <String>['B']);
+      expect(dependencies.card.deletedFolderPaths, <String>['/DCIM/C']);
+    },
+  );
+
+  test('deleteEmptyFolders stops after a connection loss', () async {
+    final dependencies = _Dependencies(
+      config: const AppConfig(deleteEnabled: true),
+    );
+    const folders = <CardItem>[
+      CardItem(name: 'A', parentPath: '/DCIM', size: 0, isDir: true),
+      CardItem(name: 'B', parentPath: '/DCIM', size: 0, isDir: true),
+    ];
+    dependencies.card.directories['/DCIM'] = List<CardItem>.of(folders);
+    dependencies.card.folderDeleteErrors['/DCIM/A'] = CardUnreachableException(
+      Uri.parse('http://flashair/upload.cgi'),
+      const SocketException('offline'),
+    );
+    final state = dependencies.createState()
+      ..config = const AppConfig(deleteEnabled: true)
+      ..connection = ConnectionStatus.connected
+      ..uploadEnabled = true
+      ..tree['/DCIM'] = List<CardItem>.of(folders);
+
+    final summary = await state.deleteEmptyFolders(folders);
+
+    expect(summary.failures.keys.single.name, 'A');
+    expect(dependencies.card.deletedFolderPaths, isEmpty);
+    expect(state.connection, ConnectionStatus.disconnected);
   });
 
   group('deleteSelected', () {
@@ -438,6 +719,7 @@ class _Dependencies {
   final _FakeCardClient card = _FakeCardClient();
   final _FakeCacheService cache = _FakeCacheService();
   final _FakeFileSaver fileSaver = _FakeFileSaver();
+  final _FakeUserPrompter prompter = _FakeUserPrompter();
   final Future<void> Function(Duration)? delay;
   final Duration pingInterval;
 
@@ -448,6 +730,7 @@ class _Dependencies {
       cardClient: card,
       cacheService: cache,
       fileSaver: fileSaver,
+      userPrompter: prompter,
       delay: delay ?? (_) async {},
       pingInterval: pingInterval,
     );
@@ -524,9 +807,24 @@ class _FakeConfigService implements ConfigService {
 }
 
 class _FakeWifiManager implements WifiManager {
+  WifiAdapterState state = WifiAdapterState.enabled;
   Object? connectError;
+  Object? enableError;
+  int enableCalls = 0;
   final List<String> connectedSsids = <String>[];
   final List<String> disconnectedSsids = <String>[];
+
+  @override
+  Future<WifiAdapterState> adapterState() async => state;
+
+  @override
+  Future<void> enableAdapter() async {
+    enableCalls++;
+    if (enableError case final error?) {
+      throw error;
+    }
+    state = WifiAdapterState.enabled;
+  }
 
   @override
   Future<void> connect(String ssid) async {
@@ -548,6 +846,17 @@ class _FakeWifiManager implements WifiManager {
   Future<List<String>> listNetworks() async => <String>['FlashAir'];
 }
 
+class _FakeUserPrompter implements UserPrompter {
+  bool answer = false;
+  int calls = 0;
+
+  @override
+  Future<bool> confirmEnableWifi() async {
+    calls++;
+    return answer;
+  }
+}
+
 class _FakeCardClient implements CardClient {
   bool pingResult = true;
   int pingCalls = 0;
@@ -562,6 +871,39 @@ class _FakeCardClient implements CardClient {
   final List<String> deletedPaths = <String>[];
   final Map<String, int> listDirCalls = <String, int>{};
   final List<String> updatedBaseUrls = <String>[];
+  final Map<String, int> fileCounts = <String, int>{};
+  final Map<String, Object> folderDeleteErrors = <String, Object>{};
+  final List<String> deletedFolderPaths = <String>[];
+  int countInFlight = 0;
+  int maximumCountInFlight = 0;
+  Completer<void>? countRelease;
+
+  @override
+  Future<int> countFiles(String dir) async {
+    countInFlight++;
+    maximumCountInFlight = countInFlight > maximumCountInFlight
+        ? countInFlight
+        : maximumCountInFlight;
+    await countRelease?.future;
+    countInFlight--;
+    return fileCounts[dir] ?? directories[dir]?.length ?? 0;
+  }
+
+  @override
+  Future<void> deleteEmptyFolder(String path) async {
+    if (folderDeleteErrors[path] case final error?) {
+      throw error;
+    }
+    final count = fileCounts[path] ?? directories[path]?.length ?? 0;
+    if (count != 0) {
+      throw FolderNotEmptyException(path, count);
+    }
+    deletedFolderPaths.add(path);
+    for (final items in directories.values) {
+      items.removeWhere((item) => item.fullPath == path);
+    }
+    directories.remove(path);
+  }
 
   @override
   void updateBaseUrl(String baseUrl) {

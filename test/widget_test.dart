@@ -73,7 +73,7 @@ void main() {
   });
 
   testWidgets('shows state errors in a retryable SnackBar', (tester) async {
-    final state = _createState();
+    final state = _createState()..config = const AppConfig(snackBarSeconds: 5);
     await tester.pumpWidget(CameraCamApp(appState: state));
 
     state.errorMessage = 'Falha simulada';
@@ -83,6 +83,10 @@ void main() {
 
     expect(find.text('Falha simulada'), findsOneWidget);
     expect(find.text('Tentar novamente'), findsOneWidget);
+    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(snackBar.duration, const Duration(seconds: 5));
+    expect(snackBar.persist, isFalse);
+    expect(snackBar.showCloseIcon, isTrue);
   });
 
   testWidgets('Ctrl+, opens settings from the main window', (tester) async {

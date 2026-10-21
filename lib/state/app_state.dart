@@ -4,10 +4,14 @@ import 'package:camera_cam/core/cache_service.dart';
 import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/core/config_service.dart';
 import 'package:camera_cam/core/file_saver.dart';
+import 'package:camera_cam/core/user_prompter.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/models/app_config.dart';
 import 'package:camera_cam/models/card_item.dart';
 import 'package:flutter/foundation.dart';
+import 'package:logging/logging.dart';
+
+final Logger _stateLog = Logger('AppState');
 
 enum ConnectionStatus { disconnected, connecting, connected, error }
 
@@ -18,15 +22,18 @@ class AppState extends ChangeNotifier {
     required this.cardClient,
     required this.cacheService,
     required this.fileSaver,
+    UserPrompter? userPrompter,
     Future<void> Function(Duration)? delay,
     this.pingInterval = const Duration(seconds: 15),
-  }) : _delay = delay ?? Future<void>.delayed;
+  }) : userPrompter = userPrompter ?? const _DecliningUserPrompter(),
+       _delay = delay ?? Future<void>.delayed;
 
   final ConfigService configService;
   final WifiManager wifiManager;
   final CardClient cardClient;
   final CacheService cacheService;
   final FileSaver fileSaver;
+  final UserPrompter userPrompter;
   final Future<void> Function(Duration) _delay;
   final Duration pingInterval;
 
@@ -44,6 +51,10 @@ class AppState extends ChangeNotifier {
   double? previewProgress;
   bool saving = false;
   bool deleting = false;
+  bool scanningFolders = false;
+  ({int done, int total}) scanProgress = (done: 0, total: 0);
+  List<CardItem> emptyFolders = <CardItem>[];
+  bool deletingFolders = false;
   bool? uploadEnabled;
   final Map<String, ({String localPath, int size})> savedThisSession =
       <String, ({String localPath, int size})>{};
@@ -69,7 +80,19 @@ class AppState extends ChangeNotifier {
         item != null &&
         !item.isDir &&
         !saving &&
-        !deleting;
+        !deleting &&
+        !scanningFolders &&
+        !deletingFolders;
+  }
+
+  bool get canDeleteFolders {
+    return config.deleteEnabled &&
+        uploadEnabled == true &&
+        connection == ConnectionStatus.connected &&
+        !saving &&
+        !deleting &&
+        !scanningFolders &&
+        !deletingFolders;
   }
 
   Future<void> init() async {
@@ -101,6 +124,10 @@ class AppState extends ChangeNotifier {
     noticeMessage = null;
     uploadEnabled = null;
     notifyListeners();
+
+    if (!await _ensureWifiReady(requiredSsid: ssid)) {
+      return;
+    }
 
     var currentSsidKnown = false;
     var wasAlreadyConnected = false;
@@ -353,6 +380,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<List<String>> listWifiNetworks() async {
+    if (!await _ensureWifiReady()) {
+      return const <String>[];
+    }
     try {
       final networks = await wifiManager.listNetworks();
       errorMessage = null;
@@ -364,6 +394,97 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return const <String>[];
     }
+  }
+
+  Future<bool> _ensureWifiReady({String? requiredSsid}) async {
+    WifiAdapterState state;
+    try {
+      state = await wifiManager.adapterState();
+      _stateLog.info('Estado do adaptador Wi-Fi recebido: ${state.name}');
+    } catch (error) {
+      _stateLog.warning('Falha ao consultar o adaptador Wi-Fi.', error);
+      connection = requiredSsid == null ? connection : ConnectionStatus.error;
+      errorMessage =
+          'Não foi possível verificar o estado do adaptador Wi-Fi: '
+          '${_errorText(error)}';
+      notifyListeners();
+      return false;
+    }
+
+    switch (state) {
+      case WifiAdapterState.enabled:
+      case WifiAdapterState.unknown:
+        return true;
+      case WifiAdapterState.unavailable:
+        connection = requiredSsid == null ? connection : ConnectionStatus.error;
+        errorMessage = 'Este computador não tem adaptador Wi-Fi.';
+        notifyListeners();
+        return false;
+      case WifiAdapterState.blocked:
+        connection = requiredSsid == null ? connection : ConnectionStatus.error;
+        errorMessage =
+            'O Wi-Fi está bloqueado por hardware. Desative o modo avião ou '
+            'use a chave física do computador.';
+        notifyListeners();
+        return false;
+      case WifiAdapterState.disabled:
+        break;
+    }
+
+    final shouldEnable = await userPrompter.confirmEnableWifi();
+    _stateLog.info('Usuário autorizou ligar o Wi-Fi: $shouldEnable');
+    if (!shouldEnable) {
+      if (requiredSsid != null) {
+        connection = ConnectionStatus.disconnected;
+      }
+      errorMessage = null;
+      noticeMessage = 'Conexão cancelada: o Wi-Fi está desligado.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      await wifiManager.enableAdapter();
+      _stateLog.info('Solicitação para ligar o adaptador concluída.');
+    } catch (error) {
+      _stateLog.warning('Falha ao ligar o adaptador Wi-Fi.', error);
+      connection = requiredSsid == null ? connection : ConnectionStatus.error;
+      errorMessage = error is WifiException
+          ? error.message
+          : 'Não foi possível ligar o Wi-Fi: ${_errorText(error)}';
+      notifyListeners();
+      return false;
+    }
+
+    for (var attempt = 0; attempt < 10; attempt++) {
+      try {
+        final networks = await wifiManager.listNetworks();
+        final ready = requiredSsid == null
+            ? networks.isNotEmpty
+            : networks.contains(requiredSsid);
+        _stateLog.info(
+          'Busca após ligar Wi-Fi (${attempt + 1}/10): '
+          '${networks.length} rede(s); pronta=$ready',
+        );
+        if (ready) {
+          errorMessage = null;
+          return true;
+        }
+      } catch (error) {
+        _stateLog.fine('Rede ainda indisponível após ligar o Wi-Fi: $error');
+      }
+      if (attempt < 9) {
+        await _delay(const Duration(seconds: 1));
+      }
+    }
+
+    connection = requiredSsid == null ? connection : ConnectionStatus.error;
+    errorMessage = requiredSsid == null
+        ? 'O Wi-Fi foi ligado, mas nenhuma rede apareceu. Tente buscar novamente.'
+        : 'A rede "$requiredSsid" não apareceu após ligar o Wi-Fi. '
+              'Verifique se a câmera está ligada.';
+    notifyListeners();
+    return false;
   }
 
   Future<bool?> verifyUploadSupport() async {
@@ -542,6 +663,199 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<bool> deleteFolder(CardItem folder) async {
+    if (!canDeleteFolders || !folder.isDir) {
+      return false;
+    }
+
+    deletingFolders = true;
+    errorMessage = null;
+    noticeMessage = null;
+    notifyListeners();
+    try {
+      await cardClient.deleteEmptyFolder(folder.fullPath);
+      _removeFolderFromLocalState(folder);
+      final relisted = await loadDir(folder.parentPath, force: true);
+      if (!relisted || _folderContains(folder.parentPath, folder.fullPath)) {
+        errorMessage = 'O cartão não removeu a pasta.';
+        return false;
+      }
+      noticeMessage = _folderDeleteNotice;
+      return true;
+    } on FolderNotEmptyException catch (error) {
+      errorMessage =
+          'A pasta não está vazia (${error.count} arquivos). Nada foi apagado.';
+      return false;
+    } on CardUnreachableException catch (error) {
+      _stopPingMonitor();
+      connection = ConnectionStatus.disconnected;
+      uploadEnabled = null;
+      errorMessage = _errorText(error);
+      return false;
+    } catch (error) {
+      errorMessage = 'Não foi possível apagar a pasta: ${_errorText(error)}';
+      return false;
+    } finally {
+      deletingFolders = false;
+      notifyListeners();
+    }
+  }
+
+  Future<List<CardItem>> scanEmptyFolders({CancelToken? cancel}) async {
+    if (!canDeleteFolders) {
+      return const <CardItem>[];
+    }
+
+    scanningFolders = true;
+    emptyFolders = <CardItem>[];
+    scanProgress = (done: 0, total: 0);
+    errorMessage = null;
+    notifyListeners();
+    final found = <CardItem>[];
+    try {
+      var dcimItems = tree['/DCIM'];
+      if (dcimItems == null) {
+        dcimItems = await cardClient.listDir('/DCIM');
+        if (!(cancel?.isCancelled ?? false)) {
+          tree['/DCIM'] = _sortItems(dcimItems);
+        }
+      }
+      var folders = dcimItems.where((item) => item.isDir).toList();
+      var depth = 1;
+      while (folders.isNotEmpty &&
+          depth <= 3 &&
+          !(cancel?.isCancelled ?? false)) {
+        scanProgress = (
+          done: scanProgress.done,
+          total: scanProgress.total + folders.length,
+        );
+        notifyListeners();
+        final nested = <CardItem>[];
+        var nextIndex = 0;
+
+        Future<void> worker() async {
+          while (nextIndex < folders.length &&
+              !(cancel?.isCancelled ?? false)) {
+            final folder = folders[nextIndex++];
+            final count = await cardClient.countFiles(folder.fullPath);
+            if (cancel?.isCancelled ?? false) {
+              return;
+            }
+            if (count == 0) {
+              found.add(folder);
+            } else if (depth < 3) {
+              var children = tree[folder.fullPath];
+              children ??= await cardClient.listDir(folder.fullPath);
+              tree[folder.fullPath] = _sortItems(children);
+              nested.addAll(children.where((item) => item.isDir));
+            }
+            scanProgress = (
+              done: scanProgress.done + 1,
+              total: scanProgress.total,
+            );
+            notifyListeners();
+          }
+        }
+
+        await Future.wait(<Future<void>>[worker(), worker()]);
+        folders = nested;
+        depth++;
+      }
+      if (!(cancel?.isCancelled ?? false)) {
+        found.sort(
+          (first, second) => first.fullPath.toLowerCase().compareTo(
+            second.fullPath.toLowerCase(),
+          ),
+        );
+        emptyFolders = List<CardItem>.unmodifiable(found);
+      }
+      _stateLog.info(
+        'Varredura de pastas concluída: verificadas=${scanProgress.done}; '
+        'vazias=${found.length}; cancelada=${cancel?.isCancelled ?? false}',
+      );
+      return List<CardItem>.unmodifiable(found);
+    } catch (error) {
+      errorMessage =
+          'Não foi possível verificar as pastas: ${_errorText(error)}';
+      _stateLog.warning('Falha na varredura de pastas vazias.', error);
+      return const <CardItem>[];
+    } finally {
+      scanningFolders = false;
+      notifyListeners();
+    }
+  }
+
+  Future<FolderDeletionSummary> deleteEmptyFolders(
+    List<CardItem> folders,
+  ) async {
+    final deleted = <CardItem>[];
+    final skipped = <CardItem>[];
+    final failures = <CardItem, String>{};
+    if (!canDeleteFolders) {
+      return FolderDeletionSummary(
+        deleted: deleted,
+        skipped: skipped,
+        failures: failures,
+      );
+    }
+
+    deletingFolders = true;
+    errorMessage = null;
+    noticeMessage = null;
+    notifyListeners();
+    final parents = <String>{};
+    try {
+      for (final folder in folders.where((item) => item.isDir)) {
+        try {
+          await cardClient.deleteEmptyFolder(folder.fullPath);
+          deleted.add(folder);
+          parents.add(folder.parentPath);
+          _removeFolderFromLocalState(folder);
+        } on FolderNotEmptyException {
+          skipped.add(folder);
+        } on CardUnreachableException catch (error) {
+          failures[folder] = _errorText(error);
+          _stopPingMonitor();
+          connection = ConnectionStatus.disconnected;
+          uploadEnabled = null;
+          errorMessage = 'A conexão com o cartão foi perdida. A exclusão das pastas foi interrompida.';
+          break;
+        } on CardDeleteException catch (error) {
+          failures[folder] = _errorText(error);
+        } catch (error) {
+          failures[folder] = _errorText(error);
+        }
+      }
+
+      if (connection == ConnectionStatus.connected) {
+        for (final parent in parents) {
+          await loadDir(parent, force: true);
+        }
+        for (final folder in deleted.toList()) {
+          if (_folderContains(folder.parentPath, folder.fullPath)) {
+            deleted.remove(folder);
+            failures[folder] = 'O cartão não removeu a pasta.';
+          }
+        }
+      }
+      if (deleted.isNotEmpty) {
+        noticeMessage = _folderDeleteNotice;
+      }
+      _stateLog.info(
+        'Exclusão de pastas concluída: apagadas=${deleted.length}; '
+        'puladas=${skipped.length}; falhas=${failures.length}',
+      );
+      return FolderDeletionSummary(
+        deleted: deleted,
+        skipped: skipped,
+        failures: failures,
+      );
+    } finally {
+      deletingFolders = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> updateConfig(AppConfig updatedConfig) async {
     final shouldRefreshUpload =
         !config.deleteEnabled &&
@@ -577,6 +891,11 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  void previewSnackBarSeconds(int seconds) {
+    config = config.copyWith(snackBarSeconds: seconds.clamp(3, 60));
+    notifyListeners();
+  }
+
   Future<Uint8List> _download(
     String path, {
     DownloadProgress? onProgress,
@@ -607,7 +926,8 @@ class AppState extends ChangeNotifier {
     if (_pingInProgress ||
         connection != ConnectionStatus.connected ||
         downloading ||
-        deleting) {
+        deleting ||
+        deletingFolders) {
       return;
     }
     _pingInProgress = true;
@@ -748,6 +1068,43 @@ class AppState extends ChangeNotifier {
     previewIsThumbnail = false;
     previewProgress = null;
     uploadEnabled = null;
+    emptyFolders = <CardItem>[];
+    scanProgress = (done: 0, total: 0);
+  }
+
+  void _removeFolderFromLocalState(CardItem folder) {
+    tree[folder.parentPath]?.removeWhere(
+      (item) => item.fullPath == folder.fullPath,
+    );
+    final prefix = '${folder.fullPath}/';
+    tree.removeWhere(
+      (path, _) => path == folder.fullPath || path.startsWith(prefix),
+    );
+    expandedPaths.removeWhere(
+      (path) => path == folder.fullPath || path.startsWith(prefix),
+    );
+    loadingPaths.removeWhere(
+      (path) => path == folder.fullPath || path.startsWith(prefix),
+    );
+    folderErrors.removeWhere(
+      (path, _) => path == folder.fullPath || path.startsWith(prefix),
+    );
+    emptyFolders = emptyFolders
+        .where(
+          (item) =>
+              item.fullPath != folder.fullPath &&
+              !item.fullPath.startsWith(prefix),
+        )
+        .toList();
+    final selectedPath = selected?.fullPath;
+    if (selectedPath != null &&
+        (selectedPath == folder.fullPath || selectedPath.startsWith(prefix))) {
+      _invalidatePreview();
+      selected = null;
+      previewBytes = null;
+      previewIsThumbnail = false;
+      previewProgress = null;
+    }
   }
 
   void _invalidatePreview() {
@@ -788,6 +1145,8 @@ String _errorText(Object error) {
     CardDeleteException() =>
       'O cartão recusou apagar. Confirme se UPLOAD=1 está ativo e se a chave '
           'de proteção do cartão não está travada.',
+    FolderNotEmptyException exception =>
+      'A pasta não está vazia (${exception.count} arquivos). Nada foi apagado.',
     CardUnreachableException() =>
       'Não foi possível alcançar o cartão. Verifique a conexão Wi-Fi e se a '
           'câmera está ligada.',
@@ -809,6 +1168,28 @@ class _PendingDeletion {
   final int previousIndex;
 }
 
+class FolderDeletionSummary {
+  const FolderDeletionSummary({
+    required this.deleted,
+    required this.skipped,
+    required this.failures,
+  });
+
+  final List<CardItem> deleted;
+  final List<CardItem> skipped;
+  final Map<CardItem, String> failures;
+}
+
 const String _deleteSuccessNotice =
     'Foto apagada. Se a câmera não enxergar o cartão ou mostrar o cartão como '
     'protegido, desligue e ligue a câmera.';
+
+const String _folderDeleteNotice =
+    'Se a câmera não reconhecer o cartão, desligue e ligue a câmera.';
+
+class _DecliningUserPrompter implements UserPrompter {
+  const _DecliningUserPrompter();
+
+  @override
+  Future<bool> confirmEnableWifi() async => false;
+}

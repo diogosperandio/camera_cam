@@ -134,6 +134,21 @@ class CardClient {
     );
   }
 
+  Future<int> countFiles(String dir) {
+    return _requestQueue.schedule(
+      () => _countFiles(dir),
+      priority: _RequestPriority.high,
+    );
+  }
+
+  Future<void> deleteEmptyFolder(String path) {
+    _validateFolderDeletePath(path);
+    return _requestQueue.schedule(
+      () => _deleteEmptyFolder(path),
+      priority: _RequestPriority.high,
+    );
+  }
+
   Future<void> deleteFile(String path, {bool writeProtect = true}) {
     _validateDeletePath(path);
     return _requestQueue.schedule(() async {
@@ -232,6 +247,54 @@ class CardClient {
     }
   }
 
+  Future<int> _countFiles(String dir) async {
+    final uri = Uri.parse(
+      '${_endpoint('/command.cgi')}?op=101&DIR=${_encodePath(dir)}',
+    );
+    final response = await _get(uri, _requestTimeout);
+    if (response.statusCode != HttpStatus.ok) {
+      throw CardHttpException(response.statusCode, uri);
+    }
+    final count = int.tryParse(response.body.trim());
+    if (count == null || count < 0) {
+      throw CardParseException(
+        'Contagem de arquivos inválida para "$dir": "${response.body.trim()}".',
+      );
+    }
+    return count;
+  }
+
+  Future<void> _deleteEmptyFolder(String path) async {
+    _cardLog.info('Verificando pasta antes da exclusão: caminho=$path');
+    final items = await _listDir(path);
+    if (items.isNotEmpty) {
+      _cardLog.info(
+        'Exclusão de pasta recusada: caminho=$path; '
+        'contagem=${items.length}; origem=listDir',
+      );
+      throw FolderNotEmptyException(path, items.length);
+    }
+
+    final count = await _countFiles(path);
+    _cardLog.info(
+      'Contagem verificada para exclusão de pasta: caminho=$path; contagem=$count',
+    );
+    if (count != 0) {
+      throw FolderNotEmptyException(path, count);
+    }
+
+    try {
+      await _deleteFile(path, true);
+      _cardLog.info('Exclusão de pasta concluída: caminho=$path; contagem=0');
+    } catch (error) {
+      _cardLog.severe(
+        'Exclusão de pasta falhou: caminho=$path; contagem=0',
+        error,
+      );
+      rethrow;
+    }
+  }
+
   Future<void> _deleteFile(String path, bool writeProtect) async {
     _cardLog.info('Tentativa de exclusão: caminho=$path');
     if (writeProtect) {
@@ -303,6 +366,8 @@ class CardClient {
   Uri _cardPathUri(String path) => _baseUri.resolve(_encodePath(path));
 }
 
+typedef CancelToken = CancellationToken;
+
 class CancellationToken {
   bool get isCancelled => _isCancelled;
 
@@ -372,6 +437,14 @@ class CardDeleteException extends CardException {
 
   final int? statusCode;
   final String body;
+}
+
+class FolderNotEmptyException extends CardException {
+  FolderNotEmptyException(this.path, this.count)
+    : super('A pasta "$path" não está vazia ($count itens).');
+
+  final String path;
+  final int count;
 }
 
 enum _RequestPriority { high, normal, low }
@@ -469,6 +542,20 @@ void _validateDeletePath(String path) {
     throw CardDeleteException(
       statusCode: null,
       body: 'O caminho deve identificar um arquivo dentro de uma pasta.',
+    );
+  }
+}
+
+void _validateFolderDeletePath(String path) {
+  final segments = path
+      .split('/')
+      .where((segment) => segment.isNotEmpty)
+      .toList();
+  if (segments.length < 2) {
+    throw ArgumentError.value(
+      path,
+      'path',
+      'Não é permitido apagar a raiz nem a pasta /DCIM.',
     );
   }
 }

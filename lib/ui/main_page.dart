@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:camera_cam/state/app_state.dart';
 import 'package:camera_cam/ui/file_tree.dart';
+import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/preview_pane.dart';
 import 'package:camera_cam/ui/settings_dialog.dart';
 import 'package:camera_cam/ui/toolbar.dart';
@@ -69,18 +70,12 @@ class _MainPageState extends State<MainPage> {
       if (!mounted) {
         return;
       }
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(message),
-          action: error == null
-              ? null
-              : SnackBarAction(
-                  label: 'Tentar novamente',
-                  onPressed: _retryLastAction,
-                ),
-        ),
+      showAppSnackBar(
+        context,
+        message,
+        actionLabel: error == null ? null : 'Tentar novamente',
+        onAction: error == null ? null : _retryLastAction,
+        isError: error != null,
       );
     });
   }

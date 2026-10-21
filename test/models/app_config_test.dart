@@ -10,6 +10,7 @@ void main() {
       disconnectOnClose: false,
       deleteEnabled: true,
       sortBy: SortBy.date,
+      snackBarSeconds: 42,
     );
 
     final restored = AppConfig.fromJson(original.toJson());
@@ -20,6 +21,7 @@ void main() {
     expect(restored.disconnectOnClose, isFalse);
     expect(restored.deleteEnabled, isTrue);
     expect(restored.sortBy, SortBy.date);
+    expect(restored.snackBarSeconds, 42);
   });
 
   test('uses the default base URL', () {
@@ -28,6 +30,7 @@ void main() {
     expect(AppConfig.fromJson(<String, dynamic>{}).deleteEnabled, isFalse);
     expect(AppConfig.fromJson(<String, dynamic>{}).disconnectOnClose, isTrue);
     expect(AppConfig.fromJson(<String, dynamic>{}).sortBy, SortBy.name);
+    expect(AppConfig.fromJson(<String, dynamic>{}).snackBarSeconds, 15);
   });
 
   test('copyWith updates and clears nullable fields', () {
@@ -39,5 +42,23 @@ void main() {
     expect(updated.outputDir, isNull);
     expect(updated.baseUrl, original.baseUrl);
     expect(updated.disconnectOnClose, isTrue);
+  });
+
+  test('clamps persisted SnackBar duration to the supported range', () {
+    expect(
+      AppConfig.fromJson(<String, dynamic>{'snackBarSeconds': 1})
+          .snackBarSeconds,
+      3,
+    );
+    expect(
+      AppConfig.fromJson(<String, dynamic>{'snackBarSeconds': 90})
+          .snackBarSeconds,
+      60,
+    );
+    expect(
+      AppConfig.fromJson(<String, dynamic>{'snackBarSeconds': 'invalid'})
+          .snackBarSeconds,
+      15,
+    );
   });
 }

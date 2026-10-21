@@ -82,6 +82,111 @@ void main() {
     expect(find.text('Recarregar'), findsOneWidget);
   });
 
+  testWidgets('labels a loaded empty folder as empty', (tester) async {
+    final state = _createState(MockClient((_) async => http.Response('', 500)));
+    const folder = CardItem(
+      name: 'EMPTY',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    state.tree['/'] = const <CardItem>[
+      CardItem(name: 'DCIM', parentPath: '/', size: 0, isDir: true),
+    ];
+    state.tree['/DCIM'] = <CardItem>[folder];
+    state.tree[folder.fullPath] = <CardItem>[];
+    state.expandedPaths.add('/DCIM');
+
+    await _pumpTree(tester, state);
+
+    expect(find.text('EMPTY'), findsOneWidget);
+    expect(find.text('vazia'), findsOneWidget);
+  });
+
+  testWidgets('shows folder delete only for loaded empty folders', (
+    tester,
+  ) async {
+    final state = _createState(MockClient((_) async => http.Response('', 500)))
+      ..config = const AppConfig(ssid: 'FlashAir', deleteEnabled: true)
+      ..uploadEnabled = true;
+    const empty = CardItem(
+      name: 'EMPTY',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    const full = CardItem(
+      name: 'FULL',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    const unloaded = CardItem(
+      name: 'UNLOADED',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    state.tree['/'] = const <CardItem>[
+      CardItem(name: 'DCIM', parentPath: '/', size: 0, isDir: true),
+    ];
+    state.tree['/DCIM'] = const <CardItem>[empty, full, unloaded];
+    state.tree[empty.fullPath] = <CardItem>[];
+    state.tree[full.fullPath] = const <CardItem>[
+      CardItem(
+        name: 'PHOTO.JPG',
+        parentPath: '/DCIM/FULL',
+        size: 1,
+        isDir: false,
+      ),
+    ];
+    state.expandedPaths.add('/DCIM');
+
+    await _pumpTree(tester, state);
+
+    expect(find.byTooltip('Apagar pasta vazia'), findsOneWidget);
+  });
+
+  testWidgets('confirms and deletes a loaded empty folder', (tester) async {
+    final urls = <String>[];
+    final state = _createState(
+      MockClient((request) async {
+        urls.add(request.url.toString());
+        if (request.url.queryParameters['op'] == '100') {
+          return http.Response('WLANSD_FILELIST\n', 200);
+        }
+        if (request.url.queryParameters['op'] == '101') {
+          return http.Response('0', 200);
+        }
+        return http.Response('SUCCESS', 200);
+      }),
+    );
+    const folder = CardItem(
+      name: 'EMPTY',
+      parentPath: '/DCIM',
+      size: 0,
+      isDir: true,
+    );
+    state.config = const AppConfig(ssid: 'FlashAir', deleteEnabled: true);
+    state.uploadEnabled = true;
+    state.tree['/'] = const <CardItem>[
+      CardItem(name: 'DCIM', parentPath: '/', size: 0, isDir: true),
+    ];
+    state.tree['/DCIM'] = <CardItem>[folder];
+    state.tree[folder.fullPath] = <CardItem>[];
+    state.expandedPaths.add('/DCIM');
+
+    await _pumpTree(tester, state);
+    await tester.tap(find.byTooltip('Apagar pasta vazia'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Apagar a pasta vazia EMPTY'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Apagar'));
+    await tester.pumpAndSettle();
+
+    expect(urls.any((url) => url.contains('DEL=/DCIM/EMPTY')), isTrue);
+    expect(state.tree['/DCIM'], isEmpty);
+  });
+
   testWidgets('fast scrolling cancels debounced off-screen thumbnails', (
     tester,
   ) async {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera_cam/models/card_item.dart';
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/file_tree.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -104,16 +105,11 @@ Future<void> saveSelectedWithFeedback(
   if (!context.mounted || path == null) {
     return;
   }
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text('Arquivo salvo em $path'),
-      action: SnackBarAction(
-        label: 'Abrir pasta',
-        onPressed: () => unawaited(state.openContainingFolder(path)),
-      ),
-    ),
+  showAppSnackBar(
+    context,
+    'Arquivo salvo em $path',
+    actionLabel: 'Abrir pasta',
+    onAction: () => unawaited(state.openContainingFolder(path)),
   );
 }
 
@@ -141,8 +137,7 @@ Future<void> confirmDeleteWithFeedback(
   if (!context.mounted || !deleted) {
     return;
   }
-  ScaffoldMessenger.of(context)
-      .showSnackBar(const SnackBar(content: Text(_deleteSuccessNotice)));
+  showAppSnackBar(context, _deleteSuccessNotice);
 }
 
 const String _deleteSuccessNotice =
