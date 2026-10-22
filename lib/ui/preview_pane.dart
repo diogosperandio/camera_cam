@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:camera_cam/models/card_item.dart';
+import 'package:camera_cam/core/exif_orientation.dart';
 import 'package:camera_cam/state/app_state.dart';
 import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/file_tree.dart';
@@ -43,6 +44,9 @@ class _PreviewPaneState extends State<PreviewPane> {
         const SingleActivator(LogicalKeyboardKey.arrowRight): () {
           unawaited(state.selectNext());
         },
+        const SingleActivator(LogicalKeyboardKey.keyR): state.rotateRight,
+        const SingleActivator(LogicalKeyboardKey.keyR, shift: true):
+            state.rotateLeft,
       },
       child: Focus(
         focusNode: _focusNode,
@@ -89,6 +93,8 @@ class _PreviewPaneState extends State<PreviewPane> {
       bytes: bytes,
       loadingFullImage: state.previewIsThumbnail,
       progress: state.previewProgress,
+      orientation: state.effectiveOrientation,
+      manuallyRotated: state.manualQuarterTurns != 0,
     );
   }
 }
@@ -105,9 +111,12 @@ Future<void> saveSelectedWithFeedback(
   if (!context.mounted || path == null) {
     return;
   }
+  final rotationMode = state.lastSaveRotationMode;
   showAppSnackBar(
     context,
-    'Arquivo salvo em $path',
+    rotationMode == null
+        ? 'Arquivo salvo em $path'
+        : 'Salvo com rotação aplicada (modo ${rotationMode == 'exif' ? 'EXIF' : 'pixels'})',
     actionLabel: 'Abrir pasta',
     onAction: () => unawaited(state.openContainingFolder(path)),
   );
@@ -165,6 +174,22 @@ class _PreviewHeader extends StatelessWidget {
         '${formatFileSize(item.size)} · ${formatDate(item.dateTime)}';
 
     final actions = <Widget>[
+      IconButton(
+        tooltip: 'Girar à esquerda (Shift+R)',
+        onPressed: state.canRotate ? state.rotateLeft : null,
+        icon: const Icon(Icons.rotate_left),
+      ),
+      IconButton(
+        tooltip: 'Girar à direita (R)',
+        onPressed: state.canRotate ? state.rotateRight : null,
+        icon: const Icon(Icons.rotate_right),
+      ),
+      if (state.manualQuarterTurns != 0)
+        TextButton.icon(
+          onPressed: state.canRotate ? state.resetRotation : null,
+          icon: const Icon(Icons.undo),
+          label: const Text('Desfazer giro'),
+        ),
       if (state.saving)
         const Padding(
           padding: EdgeInsets.all(12),
@@ -268,12 +293,16 @@ class _ZoomablePreview extends StatefulWidget {
     required this.bytes,
     required this.loadingFullImage,
     required this.progress,
+    required this.orientation,
+    required this.manuallyRotated,
     super.key,
   });
 
   final Uint8List bytes;
   final bool loadingFullImage;
   final double? progress;
+  final int orientation;
+  final bool manuallyRotated;
 
   @override
   State<_ZoomablePreview> createState() => _ZoomablePreviewState();
@@ -286,7 +315,8 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
   @override
   void didUpdateWidget(covariant _ZoomablePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.bytes, widget.bytes)) {
+    if (!identical(oldWidget.bytes, widget.bytes) ||
+        oldWidget.orientation != widget.orientation) {
       _showFitted();
     }
   }
@@ -319,14 +349,20 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
             minScale: 0.05,
             maxScale: 8,
             boundaryMargin: const EdgeInsets.all(200),
-            child: Image.memory(
-              widget.bytes,
-              fit: _fitImage ? BoxFit.contain : BoxFit.none,
-              filterQuality: widget.loadingFullImage
-                  ? FilterQuality.medium
-                  : FilterQuality.high,
-              gaplessPlayback: true,
-              errorBuilder: (_, _, _) => const _UnsupportedPreview(),
+            child: RotatedBox(
+              quarterTurns: orientationParts(widget.orientation).turns,
+              child: Transform.flip(
+                flipX: orientationParts(widget.orientation).flipH,
+                child: Image.memory(
+                  widget.bytes,
+                  fit: _fitImage ? BoxFit.contain : BoxFit.none,
+                  filterQuality: widget.loadingFullImage
+                      ? FilterQuality.medium
+                      : FilterQuality.high,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, _, _) => const _UnsupportedPreview(),
+                ),
+              ),
             ),
           ),
         ),
@@ -358,6 +394,16 @@ class _ZoomablePreviewState extends State<_ZoomablePreview> {
             bottom: 20,
             right: 12,
             child: _LoadingFullImageBadge(progress: widget.progress),
+          ),
+        if (widget.manuallyRotated)
+          Positioned(
+            left: 12,
+            top: 12,
+            child: Chip(
+              avatar: const Icon(Icons.rotate_right, size: 16),
+              label: const Text('Girada: será salva assim'),
+              visualDensity: VisualDensity.compact,
+            ),
           ),
       ],
     );

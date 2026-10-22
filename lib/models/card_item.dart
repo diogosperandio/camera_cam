@@ -33,6 +33,8 @@ class CardItem {
 
   bool get isImage => !isDir && _imageExtensions.contains(_extension);
 
+  bool get isJpeg => !isDir && (_extension == 'jpg' || _extension == 'jpeg');
+
   bool get isRaw => !isDir && _rawExtensions.contains(_extension);
 
   String get _extension {

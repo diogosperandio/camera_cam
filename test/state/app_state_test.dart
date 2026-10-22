@@ -6,6 +6,7 @@ import 'package:camera_cam/core/cache_service.dart';
 import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/core/config_service.dart';
 import 'package:camera_cam/core/file_saver.dart';
+import 'package:camera_cam/core/image_exporter.dart';
 import 'package:camera_cam/core/user_prompter.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/models/app_config.dart';
@@ -253,6 +254,137 @@ void main() {
     expect(state.canDeleteFolders, isTrue);
     state.scanningFolders = true;
     expect(state.canDeleteFolders, isFalse);
+  });
+
+  group('photo rotation', () {
+    const item = CardItem(
+      name: 'ROTATE.JPG',
+      parentPath: '/DCIM',
+      size: 4,
+      isDir: false,
+    );
+    final jpeg = Uint8List.fromList(<int>[0xff, 0xd8, 0xff, 0xd9]);
+
+    test('updates effective orientation and resets it', () async {
+      final dependencies = _Dependencies();
+      dependencies.card.downloadBytes[item.fullPath] = jpeg;
+      final state = dependencies.createState();
+      await state.selectFile(item);
+
+      state.rotateRight();
+      expect(state.rotations[item.fullPath], 1);
+      expect(state.effectiveOrientation, 6);
+      state.rotateLeft();
+      expect(state.rotations, isNot(contains(item.fullPath)));
+      expect(state.effectiveOrientation, 1);
+    });
+
+    test('disconnect clears pending rotations', () async {
+      final state = _Dependencies().createState()
+        ..config = const AppConfig(ssid: 'FlashAir')
+        ..rotations[item.fullPath] = 1;
+      await state.disconnect();
+      expect(state.rotations, isEmpty);
+    });
+
+    test('saving without rotation preserves the original bytes', () async {
+      final dependencies = _Dependencies();
+      dependencies.card.downloadBytes[item.fullPath] = jpeg;
+      final state = dependencies.createState()..selected = item;
+
+      await state.saveSelected();
+
+      expect(dependencies.fileSaver.lastBytes, orderedEquals(jpeg));
+      expect(dependencies.imageExporter.calls, isEmpty);
+    });
+
+    test('uses configured pixel mode for a rotated JPEG', () async {
+      final dependencies = _Dependencies(
+        config: const AppConfig(rotateSaveMode: 'pixels'),
+      );
+      dependencies.card.downloadBytes[item.fullPath] = jpeg;
+      final state = dependencies.createState();
+      await state.init();
+      await state.selectFile(item);
+      state.rotateRight();
+
+      await state.saveSelected();
+
+      expect(dependencies.imageExporter.calls, <int>[6]);
+      expect(state.lastSaveRotationMode, 'pixels');
+    });
+
+    test(
+      'EXIF mode falls back to pixels when the tag cannot be added',
+      () async {
+        final dependencies = _Dependencies();
+        final exifWithoutOrientation = Uint8List.fromList(<int>[
+          0xff,
+          0xd8,
+          0xff,
+          0xe1,
+          0,
+          20,
+          0x45,
+          0x78,
+          0x69,
+          0x66,
+          0,
+          0,
+          0x4d,
+          0x4d,
+          0,
+          0x2a,
+          0,
+          0,
+          0,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0xff,
+          0xd9,
+        ]);
+        final exifItem = CardItem(
+          name: item.name,
+          parentPath: item.parentPath,
+          size: exifWithoutOrientation.length,
+          isDir: false,
+        );
+        dependencies.card.downloadBytes[item.fullPath] = exifWithoutOrientation;
+        final state = dependencies.createState();
+        await state.selectFile(exifItem);
+        state.rotateRight();
+
+        await state.saveSelected();
+
+        expect(dependencies.imageExporter.calls, <int>[6]);
+        expect(state.noticeMessage, contains('regravada em pixels'));
+      },
+    );
+
+    test(
+      'save-before-delete checks the bytes actually written after rotation',
+      () async {
+        final scenario = await _deleteScenario(selectedIndex: 0);
+        scenario.state.rotations['/DCIM/A.JPG'] = 1;
+        scenario.state.originalBytes = scenario.state.previewBytes;
+        scenario.state.config = scenario.state.config.copyWith(
+          rotateSaveMode: 'pixels',
+        );
+
+        final deleted = await scenario.state.deleteSelected(
+          saveCopyFirst: true,
+        );
+
+        expect(deleted, isTrue);
+        expect(scenario.card.deletedPaths, <String>['/DCIM/A.JPG']);
+        expect(scenario.state.rotations, isNot(contains('/DCIM/A.JPG')));
+      },
+    );
   });
 
   test(
@@ -719,6 +851,7 @@ class _Dependencies {
   final _FakeCardClient card = _FakeCardClient();
   final _FakeCacheService cache = _FakeCacheService();
   final _FakeFileSaver fileSaver = _FakeFileSaver();
+  final _FakeImageExporter imageExporter = _FakeImageExporter();
   final _FakeUserPrompter prompter = _FakeUserPrompter();
   final Future<void> Function(Duration)? delay;
   final Duration pingInterval;
@@ -730,6 +863,7 @@ class _Dependencies {
       cardClient: card,
       cacheService: cache,
       fileSaver: fileSaver,
+      imageExporter: imageExporter,
       userPrompter: prompter,
       delay: delay ?? (_) async {},
       pingInterval: pingInterval,
@@ -1018,6 +1152,7 @@ class _FakeFileSaver implements FileSaver {
   final Map<String, int> fileSizes = <String, int>{};
   int saveCalls = 0;
   final List<String> openedPaths = <String>[];
+  Uint8List? lastBytes;
 
   @override
   Future<void> openContainingFolder(String filePath) async {
@@ -1031,6 +1166,7 @@ class _FakeFileSaver implements FileSaver {
     String? initialDirectory,
   }) async {
     saveCalls++;
+    lastBytes = Uint8List.fromList(bytes);
     final path = nextPath;
     if (path != null) {
       fileSizes.putIfAbsent(path, () => bytes.length);
@@ -1040,4 +1176,14 @@ class _FakeFileSaver implements FileSaver {
 
   @override
   Future<int> sizeOf(String filePath) async => fileSizes[filePath]!;
+}
+
+class _FakeImageExporter implements ImageExporter {
+  final List<int> calls = <int>[];
+
+  @override
+  Future<Uint8List> exportJpeg(Uint8List bytes, int orientation) async {
+    calls.add(orientation);
+    return Uint8List.fromList(<int>[...bytes, orientation, 95]);
+  }
 }

@@ -230,6 +230,11 @@ class _FileTreeState extends State<FileTree> {
                   ],
                 ),
               ),
+              if (!item.isDir && (state.rotations[item.fullPath] ?? 0) != 0)
+                const Tooltip(
+                  message: 'Rotação pendente',
+                  child: Icon(Icons.rotate_right, size: 17),
+                ),
               if (state.config.deleteEnabled && canOfferFolderDeletion)
                 IconButton(
                   onPressed: state.canDeleteFolders

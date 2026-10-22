@@ -11,6 +11,7 @@ void main() {
       deleteEnabled: true,
       sortBy: SortBy.date,
       snackBarSeconds: 42,
+      rotateSaveMode: 'pixels',
     );
 
     final restored = AppConfig.fromJson(original.toJson());
@@ -22,6 +23,7 @@ void main() {
     expect(restored.deleteEnabled, isTrue);
     expect(restored.sortBy, SortBy.date);
     expect(restored.snackBarSeconds, 42);
+    expect(restored.rotateSaveMode, 'pixels');
   });
 
   test('uses the default base URL', () {
@@ -31,6 +33,12 @@ void main() {
     expect(AppConfig.fromJson(<String, dynamic>{}).disconnectOnClose, isTrue);
     expect(AppConfig.fromJson(<String, dynamic>{}).sortBy, SortBy.name);
     expect(AppConfig.fromJson(<String, dynamic>{}).snackBarSeconds, 15);
+    expect(AppConfig.fromJson(<String, dynamic>{}).rotateSaveMode, 'exif');
+    expect(
+      AppConfig.fromJson(<String, dynamic>{'rotateSaveMode': 'unknown'})
+          .rotateSaveMode,
+      'exif',
+    );
   });
 
   test('copyWith updates and clears nullable fields', () {

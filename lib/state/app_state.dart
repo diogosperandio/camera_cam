@@ -4,6 +4,8 @@ import 'package:camera_cam/core/cache_service.dart';
 import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/core/config_service.dart';
 import 'package:camera_cam/core/file_saver.dart';
+import 'package:camera_cam/core/exif_orientation.dart';
+import 'package:camera_cam/core/image_exporter.dart';
 import 'package:camera_cam/core/user_prompter.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/models/app_config.dart';
@@ -22,10 +24,12 @@ class AppState extends ChangeNotifier {
     required this.cardClient,
     required this.cacheService,
     required this.fileSaver,
+    ImageExporter? imageExporter,
     UserPrompter? userPrompter,
     Future<void> Function(Duration)? delay,
     this.pingInterval = const Duration(seconds: 15),
-  }) : userPrompter = userPrompter ?? const _DecliningUserPrompter(),
+  }) : imageExporter = imageExporter ?? const IsolateImageExporter(),
+       userPrompter = userPrompter ?? const _DecliningUserPrompter(),
        _delay = delay ?? Future<void>.delayed;
 
   final ConfigService configService;
@@ -33,6 +37,7 @@ class AppState extends ChangeNotifier {
   final CardClient cardClient;
   final CacheService cacheService;
   final FileSaver fileSaver;
+  final ImageExporter imageExporter;
   final UserPrompter userPrompter;
   final Future<void> Function(Duration) _delay;
   final Duration pingInterval;
@@ -47,6 +52,9 @@ class AppState extends ChangeNotifier {
   final Map<String, String> folderErrors = <String, String>{};
   CardItem? selected;
   Uint8List? previewBytes;
+  Uint8List? originalBytes;
+  Uint8List? displayBytes;
+  int baseOrientation = 1;
   bool previewIsThumbnail = false;
   double? previewProgress;
   bool saving = false;
@@ -56,8 +64,10 @@ class AppState extends ChangeNotifier {
   List<CardItem> emptyFolders = <CardItem>[];
   bool deletingFolders = false;
   bool? uploadEnabled;
-  final Map<String, ({String localPath, int size})> savedThisSession =
-      <String, ({String localPath, int size})>{};
+  final Map<String, int> rotations = <String, int>{};
+  final Map<String, ({String localPath, int size, bool rotated})>
+  savedThisSession = <String, ({String localPath, int size, bool rotated})>{};
+  String? lastSaveRotationMode;
 
   final Map<String, int> _loadGenerations = <String, int>{};
   int _previewGeneration = 0;
@@ -71,6 +81,16 @@ class AppState extends ChangeNotifier {
 
   bool get downloading => _activeDownloads > 0;
   bool get connectedByApp => _connectedByApp;
+
+  int get manualQuarterTurns => rotations[selected?.fullPath] ?? 0;
+
+  int get effectiveOrientation => composeOrientation(
+    previewIsThumbnail ? 1 : baseOrientation,
+    manualQuarterTurns,
+  );
+
+  bool get canRotate =>
+      selected?.isJpeg == true && originalBytes != null && !previewIsThumbnail;
 
   bool get canDelete {
     final item = selected;
@@ -285,6 +305,9 @@ class AppState extends ChangeNotifier {
     final generation = ++_previewGeneration;
     selected = item;
     previewBytes = null;
+    originalBytes = null;
+    displayBytes = null;
+    baseOrientation = 1;
     previewIsThumbnail = false;
     previewProgress = 0;
     errorMessage = null;
@@ -307,6 +330,7 @@ class AppState extends ChangeNotifier {
         );
         if (_isCurrentPreview(generation, item)) {
           previewBytes = thumbnail;
+          displayBytes = thumbnail;
           previewIsThumbnail = true;
           notifyListeners();
         }
@@ -333,9 +357,15 @@ class AppState extends ChangeNotifier {
         await cacheService.put(item.fullPath, photo, fileSize: item.size);
       }
       if (_isCurrentPreview(generation, item)) {
-        previewBytes = photo;
+        originalBytes = photo;
+        baseOrientation = readOrientation(photo) ?? 1;
+        displayBytes = baseOrientation == 1
+            ? photo
+            : writeOrientation(photo, 1) ?? photo;
+        previewBytes = displayBytes;
         previewIsThumbnail = false;
         previewProgress = 1;
+        _logOrientation(item.fullPath, mode: 'visualização');
         notifyListeners();
       }
     } catch (error) {
@@ -531,6 +561,37 @@ class AppState extends ChangeNotifier {
 
   Future<void> selectPrevious() => _selectRelative(-1);
 
+  void rotateRight() => _rotateSelected(1);
+
+  void rotateLeft() => _rotateSelected(-1);
+
+  void resetRotation() {
+    final path = selected?.fullPath;
+    if (path == null || !rotations.containsKey(path)) {
+      return;
+    }
+    rotations.remove(path);
+    savedThisSession.remove(path);
+    _logOrientation(path, mode: 'visualização');
+    notifyListeners();
+  }
+
+  void _rotateSelected(int delta) {
+    final item = selected;
+    if (!canRotate || item == null) {
+      return;
+    }
+    final turns = ((manualQuarterTurns + delta) % 4 + 4) % 4;
+    if (turns == 0) {
+      rotations.remove(item.fullPath);
+    } else {
+      rotations[item.fullPath] = turns;
+    }
+    savedThisSession.remove(item.fullPath);
+    _logOrientation(item.fullPath, mode: 'visualização');
+    notifyListeners();
+  }
+
   Future<String?> saveSelected() async {
     final item = selected;
     if (item == null || item.isDir || saving) {
@@ -539,10 +600,11 @@ class AppState extends ChangeNotifier {
 
     saving = true;
     errorMessage = null;
+    lastSaveRotationMode = null;
     notifyListeners();
     try {
       var bytes = !previewIsThumbnail && selected?.fullPath == item.fullPath
-          ? previewBytes
+          ? originalBytes
           : null;
       bytes ??= await cacheService.get(item.fullPath, fileSize: item.size);
       if (bytes == null) {
@@ -550,15 +612,46 @@ class AppState extends ChangeNotifier {
         await cacheService.put(item.fullPath, bytes, fileSize: item.size);
       }
 
+      final originalOrientation = readOrientation(bytes) ?? 1;
+      final turns = rotations[item.fullPath] ?? 0;
+      final effective = composeOrientation(originalOrientation, turns);
+      var bytesToSave = bytes;
+      var mode = 'original';
+      if (effective != originalOrientation) {
+        if (config.rotateSaveMode == 'exif') {
+          final withOrientation = writeOrientation(bytes, effective);
+          if (withOrientation != null) {
+            bytesToSave = withOrientation;
+            mode = 'exif';
+          } else {
+            noticeMessage = 'Não foi possível ajustar o EXIF; a foto será regravada em pixels.';
+            bytesToSave = await imageExporter.exportJpeg(bytes, effective);
+            mode = 'pixels';
+          }
+        } else {
+          bytesToSave = await imageExporter.exportJpeg(bytes, effective);
+          mode = 'pixels';
+        }
+      }
+      _stateLog.info(
+        'Salvando ${item.fullPath}: orientação base=$originalOrientation; '
+        'giros=$turns; orientação efetiva=$effective; modo=$mode',
+      );
+
       final localPath = await fileSaver.save(
         suggestedName: item.name,
-        bytes: bytes,
+        bytes: bytesToSave,
         initialDirectory: config.outputDir,
       );
       if (localPath == null) {
         return null;
       }
-      savedThisSession[item.fullPath] = (localPath: localPath, size: item.size);
+      savedThisSession[item.fullPath] = (
+        localPath: localPath,
+        size: bytesToSave.length,
+        rotated: turns != 0,
+      );
+      lastSaveRotationMode = mode == 'original' ? null : mode;
       return localPath;
     } catch (error) {
       errorMessage = 'Não foi possível salvar o arquivo: ${_errorText(error)}';
@@ -607,7 +700,8 @@ class AppState extends ChangeNotifier {
         }
 
         final localSize = await fileSaver.sizeOf(saved.localPath);
-        if (localSize != item.size) {
+        if (localSize != saved.size ||
+            (!saved.rotated && localSize != item.size)) {
           errorMessage =
               'O tamanho da cópia salva é diferente do arquivo no cartão.';
           return false;
@@ -649,6 +743,7 @@ class AppState extends ChangeNotifier {
         return false;
       }
 
+      rotations.remove(item.fullPath);
       await cacheService.remove(item.fullPath);
       await _selectAfterDeletion(item.parentPath, previousIndex);
       return true;
@@ -974,6 +1069,7 @@ class AppState extends ChangeNotifier {
       return;
     }
 
+    rotations.remove(pending.item.fullPath);
     try {
       await cacheService.remove(pending.item.fullPath);
     } catch (error) {
@@ -1010,6 +1106,9 @@ class AppState extends ChangeNotifier {
       _invalidatePreview();
       selected = null;
       previewBytes = null;
+      originalBytes = null;
+      displayBytes = null;
+      baseOrientation = 1;
       previewIsThumbnail = false;
       previewProgress = null;
       notifyListeners();
@@ -1065,6 +1164,10 @@ class AppState extends ChangeNotifier {
     _loadGenerations.clear();
     selected = null;
     previewBytes = null;
+    originalBytes = null;
+    displayBytes = null;
+    baseOrientation = 1;
+    rotations.clear();
     previewIsThumbnail = false;
     previewProgress = null;
     uploadEnabled = null;
@@ -1102,6 +1205,9 @@ class AppState extends ChangeNotifier {
       _invalidatePreview();
       selected = null;
       previewBytes = null;
+      originalBytes = null;
+      displayBytes = null;
+      baseOrientation = 1;
       previewIsThumbnail = false;
       previewProgress = null;
     }
@@ -1111,6 +1217,14 @@ class AppState extends ChangeNotifier {
     _thumbnailCancellationToken?.cancel();
     _thumbnailCancellationToken = null;
     _previewGeneration++;
+  }
+
+  void _logOrientation(String path, {required String mode}) {
+    _stateLog.info(
+      '$path: orientação base=$baseOrientation; giros=${rotations[path] ?? 0}; '
+      'orientação efetiva=${composeOrientation(baseOrientation, rotations[path] ?? 0)}; '
+      'modo=$mode',
+    );
   }
 
   bool _isCurrentPreview(int generation, CardItem item) {

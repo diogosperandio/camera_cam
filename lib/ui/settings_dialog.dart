@@ -37,6 +37,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late final int _initialSnackBarSeconds;
   late int _snackBarSeconds;
   bool _settingsSaved = false;
+  late String _rotateSaveMode;
   late final AppState _appState;
 
   @override
@@ -52,6 +53,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _deleteConfirmed = config.deleteEnabled;
     _initialSnackBarSeconds = config.snackBarSeconds;
     _snackBarSeconds = config.snackBarSeconds;
+    _rotateSaveMode = config.rotateSaveMode;
     unawaited(_loadCacheSize());
   }
 
@@ -200,6 +202,37 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   onChanged: (value) {
                     setState(() => _disconnectOnClose = value);
                   },
+                ),
+                const Divider(),
+                Text(
+                  'Ao salvar fotos giradas',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                RadioGroup<String>(
+                  groupValue: _rotateSaveMode,
+                  onChanged: (value) {
+                    setState(() => _rotateSaveMode = value ?? 'exif');
+                  },
+                  child: const Column(
+                    children: <Widget>[
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        value: 'exif',
+                        title: Text('Ajustar a orientação (EXIF)'),
+                        subtitle: Text(
+                          'Sem perda e instantâneo; alguns programas podem ignorar.',
+                        ),
+                      ),
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        value: 'pixels',
+                        title: Text('Regravar os pixels'),
+                        subtitle: Text(
+                          'Funciona em qualquer programa, mas recompacta o JPEG.',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const Divider(),
                 Text(
@@ -448,6 +481,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
         disconnectOnClose: _disconnectOnClose,
         deleteEnabled: _deleteEnabled,
         snackBarSeconds: _snackBarSeconds,
+        rotateSaveMode: _rotateSaveMode,
       ),
     );
     if (!mounted) {

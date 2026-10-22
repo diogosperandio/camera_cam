@@ -7,6 +7,7 @@ class AppConfig {
     this.deleteEnabled = false,
     this.sortBy = SortBy.name,
     this.snackBarSeconds = 15,
+    this.rotateSaveMode = 'exif',
   });
 
   static const Object _notProvided = Object();
@@ -18,6 +19,7 @@ class AppConfig {
   final bool deleteEnabled;
   final SortBy sortBy;
   final int snackBarSeconds;
+  final String rotateSaveMode;
 
   AppConfig copyWith({
     Object? ssid = _notProvided,
@@ -27,6 +29,7 @@ class AppConfig {
     bool? deleteEnabled,
     SortBy? sortBy,
     int? snackBarSeconds,
+    String? rotateSaveMode,
   }) {
     return AppConfig(
       ssid: identical(ssid, _notProvided) ? this.ssid : ssid as String?,
@@ -38,6 +41,9 @@ class AppConfig {
       deleteEnabled: deleteEnabled ?? this.deleteEnabled,
       sortBy: sortBy ?? this.sortBy,
       snackBarSeconds: snackBarSeconds ?? this.snackBarSeconds,
+      rotateSaveMode: _validRotateSaveMode(
+        rotateSaveMode ?? this.rotateSaveMode,
+      ),
     );
   }
 
@@ -50,6 +56,7 @@ class AppConfig {
       'deleteEnabled': deleteEnabled,
       'sortBy': sortBy.name,
       'snackBarSeconds': snackBarSeconds,
+      'rotateSaveMode': rotateSaveMode,
     };
   }
 
@@ -65,8 +72,13 @@ class AppConfig {
         orElse: () => SortBy.name,
       ),
       snackBarSeconds: _clampSnackBarSeconds(json['snackBarSeconds']),
+      rotateSaveMode: _validRotateSaveMode(json['rotateSaveMode']),
     );
   }
+}
+
+String _validRotateSaveMode(Object? value) {
+  return value == 'pixels' ? 'pixels' : 'exif';
 }
 
 int _clampSnackBarSeconds(Object? value) {
