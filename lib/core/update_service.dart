@@ -70,8 +70,8 @@ class UpdateService implements UpdateRepository {
 
       final version = latest.toString();
       final expectedName = switch (platform) {
-        'linux' => 'ezshare_viewer-v$version-linux-x64.tar.gz',
-        'windows' => 'ezshare_viewer-v$version-windows-x64.zip',
+        'linux' => 'toshiba-flashair-wifi-viewer-v$version-linux-x64.tar.gz',
+        'windows' => 'toshiba-flashair-wifi-viewer-v$version-windows-x64.zip',
         _ => '',
       };
       Map<String, dynamic>? asset;
@@ -258,7 +258,7 @@ class UpdateService implements UpdateRepository {
   Map<String, String> get _headers => const <String, String>{
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'ezshare-viewer-update-client',
+    'User-Agent': 'toshiba-flashair-wifi-viewer-update-client',
   };
 }
 

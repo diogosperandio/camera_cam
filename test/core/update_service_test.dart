@@ -169,10 +169,10 @@ Map<String, Object> _releaseJson({String tag = 'v1.0.3'}) => <String, Object>{
   'prerelease': false,
   'assets': <Object>[
     for (final name in <String>[
-      'ezshare_viewer-v1.0.3-linux-x64.tar.gz',
-      'ezshare_viewer-v1.0.3-linux-x64.tar.gz.sha256',
-      'ezshare_viewer-v1.0.3-windows-x64.zip',
-      'ezshare_viewer-v1.0.3-windows-x64.zip.sha256',
+      'toshiba-flashair-wifi-viewer-v1.0.3-linux-x64.tar.gz',
+      'toshiba-flashair-wifi-viewer-v1.0.3-linux-x64.tar.gz.sha256',
+      'toshiba-flashair-wifi-viewer-v1.0.3-windows-x64.zip',
+      'toshiba-flashair-wifi-viewer-v1.0.3-windows-x64.zip.sha256',
     ])
       <String, Object>{
         'name': name,

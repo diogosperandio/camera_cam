@@ -6,15 +6,18 @@
 # Uso: ./release.sh [--skip-checks] [--dry-run]
 #   --skip-checks  não roda flutter analyze / flutter test antes de lançar
 #   --dry-run      mostra o que seria feito, sem alterar nada
+#   --no-changelog não pede notas; a release usará as notas automáticas do GitHub
 set -euo pipefail
 
 SKIP_CHECKS=0
 DRY_RUN=0
+NO_CHANGELOG=0
 for arg in "$@"; do
   case "$arg" in
     --skip-checks) SKIP_CHECKS=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    --no-changelog) NO_CHANGELOG=1 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "Opção desconhecida: $arg (use --help)"; exit 1 ;;
   esac
 done
@@ -135,6 +138,62 @@ done
 new_build=$((cur_build + 1))
 new_pubspec="$new_version+$new_build"
 
+# ---------- 3b. Changelog ----------
+CHANGELOG=CHANGELOG.md
+notes_text=""
+notes_file="$(mktemp)"
+trap 'rm -f "$notes_file" "${section_file:-}"' EXIT
+
+# Insere a seção da versão no CHANGELOG.md, antes da seção mais recente.
+insert_changelog() {
+  local version="$1" notes="$2" tmp
+  section_file="$(mktemp)"
+  printf '## [%s] - %s\n\n%s\n\n' "$version" "$(date +%Y-%m-%d)" "$notes" > "$section_file"
+  if [ ! -f "$CHANGELOG" ]; then
+    printf '# Changelog\n\nTodas as mudanças notáveis deste projeto ficam neste arquivo.\n\n' > "$CHANGELOG"
+  fi
+  tmp="$(mktemp)"
+  awk -v sf="$section_file" '
+    !done && /^## / { while ((getline l < sf) > 0) print l; done=1 }
+    { print }
+    END { if (!done) while ((getline l < sf) > 0) print l }
+  ' "$CHANGELOG" > "$tmp"
+  mv "$tmp" "$CHANGELOG"
+}
+
+if [ "$NO_CHANGELOG" = 1 ]; then
+  warn "Sem changelog (--no-changelog): a release usará as notas automáticas do GitHub."
+elif [ -f "$CHANGELOG" ] && grep -q "^## \[$new_version\]" "$CHANGELOG"; then
+  ok "O $CHANGELOG já tem a seção [$new_version]; ela será usada nas notas da release."
+else
+  range="HEAD"; [ -n "$last_tag" ] && range="$last_tag..HEAD"
+  commits="$(git log --no-merges --pretty='- %s' "$range" | grep -vE '^- Versão [0-9]' | head -n 60 || true)"
+  {
+    echo "# Notas da versão $new_version (vão para o CHANGELOG.md e para a página da release)."
+    echo "# Linhas que começam com '# ' são ignoradas. Apague o que não servir."
+    echo "# Sugestão: reescreva os commits abaixo em linguagem de usuário, agrupando em"
+    echo "# ### Novidades, ### Melhorias e ### Correções. Salve e feche o editor."
+    echo
+    echo "### Alterações"
+    if [ -n "$commits" ]; then echo "$commits"; else echo "- "; fi
+  } > "$notes_file"
+
+  editor="${VISUAL:-${EDITOR:-}}"
+  if [ -z "$editor" ]; then
+    for e in nano vim vi; do command -v "$e" >/dev/null 2>&1 && { editor="$e"; break; }; done
+  fi
+  [ -n "$editor" ] || die "Nenhum editor encontrado. Defina a variável EDITOR (ex.: export EDITOR=nano)."
+  info "Abrindo o editor para as notas da versão $new_version..."
+  bash -c "$editor \"\$1\"" _ "$notes_file" || die "O editor terminou com erro."
+
+  notes_text="$(grep -vE '^#([[:space:]]|$)' "$notes_file" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | sed '/./,$!d')"
+  if ! echo "$notes_text" | grep -q '[[:alnum:]]'; then
+    notes_text=""
+    warn "As notas ficaram vazias."
+    ask_yes_no "Continuar sem changelog (a release usará as notas automáticas do GitHub)?" n || { echo "Cancelado. Nada foi alterado."; exit 0; }
+  fi
+fi
+
 # ---------- 4. Confirmação ----------
 echo
 info "Resumo"
@@ -142,7 +201,11 @@ echo "  Branch:           $branch"
 echo "  Última versão:    ${last_tag:-nenhuma}"
 echo "  Nova versão:      $tag"
 echo "  pubspec.yaml:     $cur_full  ->  $new_pubspec"
-echo "  Ações:            commit do pubspec.yaml, tag $tag, push da branch e da tag"
+if [ -n "$notes_text" ]; then
+  echo "  Changelog:        seção [$new_version] será adicionada ao $CHANGELOG"
+  echo "$notes_text" | sed 's/^/                      | /'
+fi
+echo "  Ações:            commit do pubspec.yaml e do changelog, tag $tag, push da branch e da tag"
 echo "  Depois:           o GitHub Actions compila (Linux e Windows) e publica a release"
 [ "$DRY_RUN" = 1 ] && warn "Modo --dry-run: nada será alterado."
 echo
@@ -162,8 +225,13 @@ fi
 
 # ---------- 6. Commit, tag e push ----------
 run sed -i -E "s/^version:.*/version: $new_pubspec/" pubspec.yaml
-if [ "$DRY_RUN" = 1 ] || ! git diff --quiet -- pubspec.yaml; then
-  run git commit -m "Versão $new_version" -- pubspec.yaml
+if [ -n "$notes_text" ]; then
+  if [ "$DRY_RUN" = 1 ]; then echo "[dry-run] inserir seção [$new_version] em $CHANGELOG"; else insert_changelog "$new_version" "$notes_text"; fi
+fi
+run git add pubspec.yaml
+if [ -n "$notes_text" ] && [ "$DRY_RUN" = 0 ]; then git add "$CHANGELOG"; fi
+if [ "$DRY_RUN" = 1 ] || ! git diff --cached --quiet; then
+  run git commit -m "Versão $new_version"
 fi
 run git tag -a "$tag" -m "Versão $new_version"
 

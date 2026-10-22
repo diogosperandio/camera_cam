@@ -12,15 +12,27 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Extrair notas do CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '
+            /^## \[/ { if (found) exit; if (index($0, "[" v "]")) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md 2>/dev/null || true
+
       - name: Criar release (rascunho)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${{ github.ref_name }}"
-          --repo "${{ github.repository }}"
-          --title "toshiba-flashair-wifi-viewer ${{ github.ref_name }}"
-          --generate-notes
-          --draft
+        run: |
+          if grep -q '[^[:space:]]' notes.md; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "EZ Share Viewer $GITHUB_REF_NAME" --notes-file notes.md --draft
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "EZ Share Viewer $GITHUB_REF_NAME" --generate-notes --draft
+          fi
 
   build-linux:
     needs: create-release
