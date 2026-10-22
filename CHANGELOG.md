@@ -10,3 +10,12 @@ Todas as mudanças notáveis deste projeto ficam neste arquivo.
 
 ### Correções
 - Foto vertical aparecia deitada
+
+## [1.0.4] - 2026-10-22
+
+### Novidades
+- Pequenas correções
+
+### Correções
+- Pequenas correções
+
