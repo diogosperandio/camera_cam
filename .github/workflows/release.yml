@@ -28,10 +28,10 @@ jobs:
         run: |
           if grep -q '[^[:space:]]' notes.md; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "EZ Share Viewer $GITHUB_REF_NAME" --notes-file notes.md --draft
+              --title "Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME" --notes-file notes.md --draft
           else
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "EZ Share Viewer $GITHUB_REF_NAME" --generate-notes --draft
+              --title "Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME" --generate-notes --draft
           fi
 
   build-linux:
