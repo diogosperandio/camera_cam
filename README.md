@@ -31,6 +31,9 @@ O que fazer: Coloque o cartão no computador, acesse o cartão e procure pela pa
 
 ## Script Release.sh
 
+Executar: release.sh
+
+
 O que ele faz:
 Confere o repositório. Verifica se a árvore está limpa (arquivos rastreados), avisa se você não está em main ou master, e recusa se sua branch estiver atrás do GitHub.
 Mostra a última versão. Exibe a última tag, a última release publicada (se o gh estiver instalado e autenticado), a versão do pubspec.yaml e avisa se há release em rascunho, que indica build em andamento ou que falhou.

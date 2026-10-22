@@ -5,11 +5,16 @@ import 'package:camera_cam/core/card_client.dart';
 import 'package:camera_cam/core/config_service.dart';
 import 'package:camera_cam/core/file_saver.dart';
 import 'package:camera_cam/core/log_service.dart';
+import 'package:camera_cam/core/app_constants.dart';
+import 'package:camera_cam/core/update_installer.dart';
+import 'package:camera_cam/core/update_service.dart';
 import 'package:camera_cam/core/wifi_manager.dart';
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/state/update_controller.dart';
 import 'package:camera_cam/ui/main_page.dart';
 import 'package:camera_cam/ui/user_prompter.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
@@ -29,14 +34,40 @@ Future<void> main() async {
     fileSaver: FileSelectorFileSaver(),
     userPrompter: DialogUserPrompter(navigatorKey),
   );
-  runApp(CameraCamApp(appState: state, navigatorKey: navigatorKey));
-  unawaited(state.init());
+  final installer = UpdateInstaller();
+  final updateController = UpdateController(
+    appState: state,
+    service: UpdateService(http.Client(), repo: githubRepo),
+    installer: installer,
+    requestAppClose: () async {
+      await state.disconnectOnAppClose();
+      await AppLog.close();
+      await SystemNavigator.pop();
+    },
+  );
+  runApp(
+    CameraCamApp(
+      appState: state,
+      updateController: updateController,
+      navigatorKey: navigatorKey,
+    ),
+  );
+  unawaited(() async {
+    await state.init();
+    await updateController.init();
+  }());
 }
 
 class CameraCamApp extends StatefulWidget {
-  const CameraCamApp({required this.appState, this.navigatorKey, super.key});
+  const CameraCamApp({
+    required this.appState,
+    this.updateController,
+    this.navigatorKey,
+    super.key,
+  });
 
   final AppState appState;
+  final UpdateController? updateController;
   final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
@@ -87,7 +118,7 @@ class _CameraCamAppState extends State<CameraCamApp> {
           useMaterial3: true,
         ),
         themeMode: ThemeMode.system,
-        home: const MainPage(),
+        home: MainPage(updateController: widget.updateController),
       ),
     );
   }

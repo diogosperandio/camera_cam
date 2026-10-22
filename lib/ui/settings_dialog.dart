@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/state/update_controller.dart';
 import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/file_tree.dart';
 import 'package:file_selector/file_selector.dart';
@@ -8,7 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key});
+  const SettingsDialog({this.updateController, super.key});
+
+  final UpdateController? updateController;
 
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
@@ -38,6 +41,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late int _snackBarSeconds;
   bool _settingsSaved = false;
   late String _rotateSaveMode;
+  late bool _autoCheckUpdates;
   late final AppState _appState;
 
   @override
@@ -54,6 +58,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _initialSnackBarSeconds = config.snackBarSeconds;
     _snackBarSeconds = config.snackBarSeconds;
     _rotateSaveMode = config.rotateSaveMode;
+    _autoCheckUpdates = config.autoCheckUpdates;
+    widget.updateController?.addListener(_updateChanged);
     unawaited(_loadCacheSize());
   }
 
@@ -65,6 +71,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _ssidController.dispose();
     _baseUrlController.dispose();
     _outputDirController.dispose();
+    widget.updateController?.removeListener(_updateChanged);
     super.dispose();
   }
 
@@ -202,6 +209,49 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   onChanged: (value) {
                     setState(() => _disconnectOnClose = value);
                   },
+                ),
+                const Divider(),
+                Text(
+                  'Atualizações',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Verificar atualizações automaticamente'),
+                  value: _autoCheckUpdates,
+                  onChanged: (value) =>
+                      setState(() => _autoCheckUpdates = value),
+                ),
+                Text(
+                  'Versão instalada: ${widget.updateController?.currentVersion ?? '—'}',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    OutlinedButton.icon(
+                      onPressed:
+                          widget.updateController?.status ==
+                              UpdateStatus.checking
+                          ? null
+                          : _checkForUpdates,
+                      icon:
+                          widget.updateController?.status ==
+                              UpdateStatus.checking
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.system_update),
+                      label: const Text('Verificar agora'),
+                    ),
+                    if (state.config.skippedVersion case final version?)
+                      TextButton(
+                        onPressed: _stopIgnoring,
+                        child: Text('Parar de ignorar v$version'),
+                      ),
+                  ],
                 ),
                 const Divider(),
                 Text(
@@ -482,6 +532,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
         deleteEnabled: _deleteEnabled,
         snackBarSeconds: _snackBarSeconds,
         rotateSaveMode: _rotateSaveMode,
+        autoCheckUpdates: _autoCheckUpdates,
       ),
     );
     if (!mounted) {
@@ -493,6 +544,37 @@ class _SettingsDialogState extends State<SettingsDialog> {
     } else {
       setState(() => _saving = false);
     }
+  }
+
+  void _updateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _checkForUpdates() async {
+    final controller = widget.updateController;
+    if (controller == null) return;
+    await controller.checkNow();
+    if (!mounted) return;
+    final message = switch (controller.status) {
+      UpdateStatus.available =>
+        'Atualização v${controller.availableUpdate!.version} disponível.',
+      UpdateStatus.upToDate => 'Você já está usando a versão mais recente.',
+      UpdateStatus.error =>
+        controller.errorMessage ?? 'Falha ao verificar atualizações.',
+      _ => null,
+    };
+    if (message != null) {
+      showAppSnackBar(
+        context,
+        message,
+        isError: controller.status == UpdateStatus.error,
+      );
+    }
+  }
+
+  Future<void> _stopIgnoring() async {
+    await widget.updateController?.stopIgnoring();
+    if (mounted) setState(() {});
   }
 
   void _cancel() {

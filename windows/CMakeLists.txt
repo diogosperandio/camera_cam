@@ -4,7 +4,7 @@ project(camera_cam LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "camera_cam")
+set(BINARY_NAME "ezshare_viewer")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

@@ -1,4 +1,5 @@
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/state/update_controller.dart';
 import 'package:flutter/material.dart';
 
 class CameraToolbar extends StatelessWidget {
@@ -8,6 +9,8 @@ class CameraToolbar extends StatelessWidget {
     required this.onDisconnect,
     required this.onRefresh,
     required this.onSettings,
+    this.updateController,
+    this.onOpenUpdate,
     super.key,
   });
 
@@ -16,6 +19,8 @@ class CameraToolbar extends StatelessWidget {
   final VoidCallback? onDisconnect;
   final VoidCallback? onRefresh;
   final VoidCallback onSettings;
+  final UpdateController? updateController;
+  final VoidCallback? onOpenUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +39,14 @@ class CameraToolbar extends StatelessWidget {
           icon: const Icon(Icons.wifi_off),
           label: const Text('Desconectar'),
         ),
+        if (updateController?.status == UpdateStatus.available)
+          ActionChip(
+            avatar: const Icon(Icons.system_update, size: 18),
+            label: Text(
+              'Atualização v${updateController!.availableUpdate!.version}',
+            ),
+            onPressed: onOpenUpdate,
+          ),
         OutlinedButton.icon(
           onPressed: onRefresh,
           icon: const Icon(Icons.refresh),

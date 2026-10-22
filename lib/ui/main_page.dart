@@ -2,19 +2,22 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:camera_cam/state/app_state.dart';
+import 'package:camera_cam/state/update_controller.dart';
 import 'package:camera_cam/ui/file_tree.dart';
 import 'package:camera_cam/ui/app_snackbar.dart';
 import 'package:camera_cam/ui/preview_pane.dart';
 import 'package:camera_cam/ui/settings_dialog.dart';
 import 'package:camera_cam/ui/toolbar.dart';
+import 'package:camera_cam/ui/update_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 class MainPage extends StatefulWidget {
-  const MainPage({this.onOpenSettings, super.key});
+  const MainPage({this.onOpenSettings, this.updateController, super.key});
 
   final VoidCallback? onOpenSettings;
+  final UpdateController? updateController;
 
   @override
   State<MainPage> createState() => _MainPageState();
@@ -38,12 +41,27 @@ class _MainPageState extends State<MainPage> {
       _state?.removeListener(_handleStateChanged);
       _state = state..addListener(_handleStateChanged);
     }
+    widget.updateController?.removeListener(_handleUpdateChanged);
+    widget.updateController?.addListener(_handleUpdateChanged);
   }
 
   @override
   void dispose() {
     _state?.removeListener(_handleStateChanged);
+    widget.updateController?.removeListener(_handleUpdateChanged);
     super.dispose();
+  }
+
+  void _handleUpdateChanged() {
+    final controller = widget.updateController;
+    final message = controller?.previousUpdateFailure;
+    if (!mounted) return;
+    setState(() {});
+    if (message == null) return;
+    controller!.previousUpdateFailure = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showAppSnackBar(context, message, isError: true);
+    });
   }
 
   void _handleStateChanged() {
@@ -106,7 +124,18 @@ class _MainPageState extends State<MainPage> {
     }
     showDialog<void>(
       context: context,
-      builder: (context) => const SettingsDialog(),
+      builder: (context) =>
+          SettingsDialog(updateController: widget.updateController),
+    );
+  }
+
+  void _openUpdate() {
+    final controller = widget.updateController;
+    if (controller == null) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => UpdateDialog(controller: controller),
     );
   }
 
@@ -161,6 +190,8 @@ class _MainPageState extends State<MainPage> {
                     ? () => unawaited(state.loadDir('/', force: true))
                     : null,
                 onSettings: _openSettings,
+                updateController: widget.updateController,
+                onOpenUpdate: _openUpdate,
               ),
               const Divider(height: 1),
               Expanded(child: _buildBody(state, ssid)),
