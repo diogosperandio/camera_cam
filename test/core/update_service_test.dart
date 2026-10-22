@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:camera_cam/core/update_service.dart';
-import 'package:camera_cam/models/update_info.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;

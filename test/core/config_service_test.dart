@@ -1,5 +1,5 @@
-import 'package:camera_cam/core/config_service.dart';
-import 'package:camera_cam/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

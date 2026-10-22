@@ -1,14 +1,14 @@
 import 'dart:convert';
 
-import 'package:camera_cam/core/cache_service.dart';
-import 'package:camera_cam/core/card_client.dart';
-import 'package:camera_cam/core/config_service.dart';
-import 'package:camera_cam/core/file_saver.dart';
-import 'package:camera_cam/core/wifi_manager.dart';
-import 'package:camera_cam/models/app_config.dart';
-import 'package:camera_cam/models/card_item.dart';
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/ui/preview_pane.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/preview_pane.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:camera_cam/models/card_item.dart';
-import 'package:camera_cam/core/exif_orientation.dart';
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/ui/app_snackbar.dart';
-import 'package:camera_cam/ui/file_tree.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/exif_orientation.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/file_tree.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';

@@ -1,18 +1,18 @@
 import 'dart:async';
 
-import 'package:camera_cam/core/cache_service.dart';
-import 'package:camera_cam/core/card_client.dart';
-import 'package:camera_cam/core/config_service.dart';
-import 'package:camera_cam/core/file_saver.dart';
-import 'package:camera_cam/core/log_service.dart';
-import 'package:camera_cam/core/app_constants.dart';
-import 'package:camera_cam/core/update_installer.dart';
-import 'package:camera_cam/core/update_service.dart';
-import 'package:camera_cam/core/wifi_manager.dart';
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/state/update_controller.dart';
-import 'package:camera_cam/ui/main_page.dart';
-import 'package:camera_cam/ui/user_prompter.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/log_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update_installer.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/update_controller.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/main_page.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/user_prompter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -105,7 +105,7 @@ class _CameraCamAppState extends State<CameraCamApp> {
       child: MaterialApp(
         navigatorKey: widget.navigatorKey,
         debugShowCheckedModeBanner: false,
-        title: 'EZ Share Viewer',
+        title: 'Toshiba FlashAir WiFi Viewer',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
           useMaterial3: true,

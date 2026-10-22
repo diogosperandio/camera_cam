@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/state/update_controller.dart';
-import 'package:camera_cam/ui/app_snackbar.dart';
-import 'package:camera_cam/ui/file_tree.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/update_controller.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/file_tree.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';

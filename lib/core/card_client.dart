@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:camera_cam/models/card_item.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 

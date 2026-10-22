@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:camera_cam/core/update_installer.dart';
-import 'package:camera_cam/core/update_service.dart';
-import 'package:camera_cam/core/version_utils.dart';
-import 'package:camera_cam/models/update_info.dart';
-import 'package:camera_cam/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update_installer.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/version_utils.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
 import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';

@@ -1,4 +1,4 @@
-import 'package:camera_cam/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 

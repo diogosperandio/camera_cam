@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:camera_cam/core/card_client.dart';
-import 'package:camera_cam/models/app_config.dart';
-import 'package:camera_cam/models/card_item.dart';
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/ui/app_snackbar.dart';
-import 'package:camera_cam/ui/empty_folders_dialog.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/empty_folders_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';

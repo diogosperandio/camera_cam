@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:camera_cam/core/app_constants.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
 import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;

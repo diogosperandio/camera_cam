@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:camera_cam/core/log_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/log_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:logging/logging.dart';
 

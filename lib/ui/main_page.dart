@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/state/update_controller.dart';
-import 'package:camera_cam/ui/file_tree.dart';
-import 'package:camera_cam/ui/app_snackbar.dart';
-import 'package:camera_cam/ui/preview_pane.dart';
-import 'package:camera_cam/ui/settings_dialog.dart';
-import 'package:camera_cam/ui/toolbar.dart';
-import 'package:camera_cam/ui/update_dialog.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/update_controller.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/file_tree.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/preview_pane.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/settings_dialog.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/toolbar.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/update_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';

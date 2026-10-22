@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:camera_cam/core/card_client.dart';
-import 'package:camera_cam/models/card_item.dart';
-import 'package:camera_cam/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
 import 'package:flutter/material.dart';
 
 Future<void> showEmptyFoldersDialog(BuildContext context, AppState state) {

@@ -1,5 +1,5 @@
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/state/update_controller.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/update_controller.dart';
 import 'package:flutter/material.dart';
 
 class CameraToolbar extends StatelessWidget {

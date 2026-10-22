@@ -1,4 +1,4 @@
-import 'package:camera_cam/core/user_prompter.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/user_prompter.dart';
 import 'package:flutter/material.dart';
 
 class DialogUserPrompter implements UserPrompter {

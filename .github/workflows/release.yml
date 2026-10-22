@@ -18,7 +18,7 @@ jobs:
         run: >
           gh release create "${{ github.ref_name }}"
           --repo "${{ github.repository }}"
-          --title "EZ Share Viewer ${{ github.ref_name }}"
+          --title "toshiba-flashair-wifi-viewer ${{ github.ref_name }}"
           --generate-notes
           --draft
 
@@ -39,12 +39,12 @@ jobs:
       - run: flutter test
       - run: flutter build linux --release
       - name: Empacotar
-        run: tar -czf ezshare_viewer-${{ github.ref_name }}-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+        run: tar -czf toshiba-flashair-wifi-viewer-${{ github.ref_name }}-linux-x64.tar.gz -C build/linux/x64/release/bundle .
       - name: Anexar à release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ARQ="ezshare_viewer-${{ github.ref_name }}-linux-x64.tar.gz"
+          ARQ="toshiba-flashair-wifi-viewer-${{ github.ref_name }}-linux-x64.tar.gz"
           sha256sum "$ARQ" > "$ARQ.sha256"
           gh release upload "${{ github.ref_name }}" "$ARQ" "$ARQ.sha256" --clobber
 
@@ -61,13 +61,13 @@ jobs:
       - run: flutter build windows --release
       - name: Empacotar
         shell: pwsh
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ezshare_viewer-${{ github.ref_name }}-windows-x64.zip
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath toshiba-flashair-wifi-viewer-${{ github.ref_name }}-windows-x64.zip
       - name: Anexar à release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = "ezshare_viewer-${{ github.ref_name }}-windows-x64.zip"
+          $zip = "toshiba-flashair-wifi-viewer-${{ github.ref_name }}-windows-x64.zip"
           $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           "$h  $zip" | Out-File -Encoding ascii "$zip.sha256"
           gh release upload "${{ github.ref_name }}" "$zip" "$zip.sha256" --clobber

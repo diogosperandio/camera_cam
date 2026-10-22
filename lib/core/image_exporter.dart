@@ -1,4 +1,4 @@
-import 'package:camera_cam/core/exif_orientation.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/exif_orientation.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as image;
 

@@ -1,4 +1,4 @@
-import 'package:camera_cam/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

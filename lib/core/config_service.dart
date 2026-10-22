@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:camera_cam/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ConfigService {

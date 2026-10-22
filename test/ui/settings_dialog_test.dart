@@ -1,13 +1,13 @@
 import 'dart:typed_data';
 
-import 'package:camera_cam/core/cache_service.dart';
-import 'package:camera_cam/core/card_client.dart';
-import 'package:camera_cam/core/config_service.dart';
-import 'package:camera_cam/core/file_saver.dart';
-import 'package:camera_cam/core/wifi_manager.dart';
-import 'package:camera_cam/models/app_config.dart';
-import 'package:camera_cam/state/app_state.dart';
-import 'package:camera_cam/ui/settings_dialog.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
+import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/settings_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
