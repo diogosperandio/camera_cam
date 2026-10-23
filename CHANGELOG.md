@@ -2,6 +2,12 @@
 
 Todas as mudanças notáveis deste projeto ficam neste arquivo.
 
+## [1.0.5] - 2026-10-23
+
+### Alterações
+- Renomeia app para Toshiba FlashAir WiFi Viewer
+- Major automatic update fix
+
 ## [1.0.3] - 2026-10-22
 
 ### Novidades
