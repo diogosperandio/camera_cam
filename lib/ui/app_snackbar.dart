@@ -2,6 +2,8 @@ import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+const Color appSnackBarBackgroundColor = Color(0xFF212121);
+
 void showAppSnackBar(
   BuildContext context,
   String message, {
@@ -11,19 +13,22 @@ void showAppSnackBar(
 }) {
   final messenger = ScaffoldMessenger.of(context);
   final seconds = context.read<AppState>().config.snackBarSeconds.clamp(3, 60);
-  final colorScheme = Theme.of(context).colorScheme;
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(
     SnackBar(
-      content: Text(message),
+      content: Text(message, style: const TextStyle(color: Colors.white)),
       duration: Duration(seconds: seconds),
       persist: false,
       showCloseIcon: true,
-      backgroundColor: isError ? colorScheme.errorContainer : null,
-      closeIconColor: isError ? colorScheme.onErrorContainer : null,
+      backgroundColor: appSnackBarBackgroundColor,
+      closeIconColor: Colors.white,
       action: actionLabel == null || onAction == null
           ? null
-          : SnackBarAction(label: actionLabel, onPressed: onAction),
+          : SnackBarAction(
+              label: actionLabel,
+              textColor: Colors.white,
+              onPressed: onAction,
+            ),
     ),
   );
 }

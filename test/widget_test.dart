@@ -6,6 +6,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/main.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,6 +88,9 @@ void main() {
     expect(snackBar.duration, const Duration(seconds: 5));
     expect(snackBar.persist, isFalse);
     expect(snackBar.showCloseIcon, isTrue);
+    expect(snackBar.backgroundColor, appSnackBarBackgroundColor);
+    expect(snackBar.closeIconColor, Colors.white);
+    expect(snackBar.action?.textColor, Colors.white);
   });
 
   testWidgets('Ctrl+, opens settings from the main window', (tester) async {
