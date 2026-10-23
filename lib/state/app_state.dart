@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
@@ -6,6 +7,9 @@ import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/exif_orientation.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/image_exporter.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/map_launcher.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/metadata_reader.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/photo_metadata.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/user_prompter.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
@@ -17,6 +21,17 @@ final Logger _stateLog = Logger('AppState');
 
 enum ConnectionStatus { disconnected, connecting, connected, error }
 
+enum MetadataLoadStatus {
+  idle,
+  loading,
+  available,
+  noExif,
+  unsupported,
+  rangeUnsupported,
+  removed,
+  error,
+}
+
 class AppState extends ChangeNotifier {
   AppState({
     required this.configService,
@@ -25,10 +40,12 @@ class AppState extends ChangeNotifier {
     required this.cacheService,
     required this.fileSaver,
     ImageExporter? imageExporter,
+    MapLauncher? mapLauncher,
     UserPrompter? userPrompter,
     Future<void> Function(Duration)? delay,
     this.pingInterval = const Duration(seconds: 15),
   }) : imageExporter = imageExporter ?? const IsolateImageExporter(),
+       mapLauncher = mapLauncher ?? const SystemMapLauncher(),
        userPrompter = userPrompter ?? const _DecliningUserPrompter(),
        _delay = delay ?? Future<void>.delayed;
 
@@ -38,6 +55,7 @@ class AppState extends ChangeNotifier {
   final CacheService cacheService;
   final FileSaver fileSaver;
   final ImageExporter imageExporter;
+  final MapLauncher mapLauncher;
   final UserPrompter userPrompter;
   final Future<void> Function(Duration) _delay;
   final Duration pingInterval;
@@ -55,6 +73,9 @@ class AppState extends ChangeNotifier {
   Uint8List? originalBytes;
   Uint8List? displayBytes;
   int baseOrientation = 1;
+  int? thumbnailOrientation;
+  int? thumbnailWidth;
+  int? thumbnailHeight;
   bool previewIsThumbnail = false;
   double? previewProgress;
   bool saving = false;
@@ -68,6 +89,10 @@ class AppState extends ChangeNotifier {
   final Map<String, ({String localPath, int size, bool rotated})>
   savedThisSession = <String, ({String localPath, int size, bool rotated})>{};
   String? lastSaveRotationMode;
+  PhotoMetadata? photoMetadata;
+  MetadataLoadStatus metadataStatus = MetadataLoadStatus.idle;
+  String? metadataError;
+  bool selectedFileRemoved = false;
 
   final Map<String, int> _loadGenerations = <String, int>{};
   int _previewGeneration = 0;
@@ -78,6 +103,10 @@ class AppState extends ChangeNotifier {
   Timer? _pingTimer;
   _PendingDeletion? _pendingDeletion;
   CancellationToken? _thumbnailCancellationToken;
+  CancellationToken? _metadataCancellationToken;
+  final List<CancellationToken> _metadataPrefetchTokens = <CancellationToken>[];
+  final Map<String, PhotoMetadata> _metadataCache = <String, PhotoMetadata>{};
+  final Map<String, ThumbResult> _thumbnailInfo = <String, ThumbResult>{};
 
   bool get downloading => _activeDownloads > 0;
   bool get connectedByApp => _connectedByApp;
@@ -85,9 +114,12 @@ class AppState extends ChangeNotifier {
   int get manualQuarterTurns => rotations[selected?.fullPath] ?? 0;
 
   int get effectiveOrientation => composeOrientation(
-    previewIsThumbnail ? 1 : baseOrientation,
+    previewIsThumbnail ? thumbnailOrientation ?? 1 : baseOrientation,
     manualQuarterTurns,
   );
+
+  PhotoMetadata? cachedMetadataFor(CardItem item) =>
+      _metadataCache[_metadataKey(item)];
 
   bool get canRotate =>
       selected?.isJpeg == true && originalBytes != null && !previewIsThumbnail;
@@ -305,6 +337,7 @@ class AppState extends ChangeNotifier {
     }
 
     _thumbnailCancellationToken?.cancel();
+    _cancelMetadataRequests();
     final cancellationToken = CancellationToken();
     _thumbnailCancellationToken = cancellationToken;
     final generation = ++_previewGeneration;
@@ -313,29 +346,52 @@ class AppState extends ChangeNotifier {
     originalBytes = null;
     displayBytes = null;
     baseOrientation = 1;
+    thumbnailOrientation = null;
+    thumbnailWidth = null;
+    thumbnailHeight = null;
     previewIsThumbnail = false;
     previewProgress = 0;
     errorMessage = null;
+    metadataError = null;
+    selectedFileRemoved = false;
+    photoMetadata = cachedMetadataFor(item);
+    metadataStatus = photoMetadata == null
+        ? (item.isJpeg
+              ? MetadataLoadStatus.idle
+              : MetadataLoadStatus.unsupported)
+        : MetadataLoadStatus.available;
     notifyListeners();
 
+    if (config.showInfoPanel && item.isJpeg) {
+      unawaited(loadSelectedMetadata());
+    }
+
     try {
-      var thumbnail = await cacheService.getThumb(
+      final cachedThumbnail = await cacheService.getThumb(
         item.fullPath,
         fileSize: item.size,
       );
+      var thumbnail = _thumbnailInfo[_metadataKey(item)];
+      if (thumbnail == null && cachedThumbnail != null) {
+        thumbnail = ThumbResult(bytes: cachedThumbnail);
+      }
       thumbnail ??= await cardClient.thumbnail(
         item.fullPath,
         cancellationToken: cancellationToken,
       );
       if (thumbnail != null) {
+        _thumbnailInfo[_metadataKey(item)] = thumbnail;
         await cacheService.putThumb(
           item.fullPath,
-          thumbnail,
+          thumbnail.bytes,
           fileSize: item.size,
         );
         if (_isCurrentPreview(generation, item)) {
-          previewBytes = thumbnail;
-          displayBytes = thumbnail;
+          previewBytes = thumbnail.bytes;
+          displayBytes = thumbnail.bytes;
+          thumbnailWidth = thumbnail.width;
+          thumbnailHeight = thumbnail.height;
+          thumbnailOrientation = thumbnail.orientation;
           previewIsThumbnail = true;
           notifyListeners();
         }
@@ -364,6 +420,13 @@ class AppState extends ChangeNotifier {
       if (_isCurrentPreview(generation, item)) {
         originalBytes = photo;
         baseOrientation = readOrientation(photo) ?? 1;
+        if (thumbnailOrientation != null &&
+            thumbnailOrientation != baseOrientation) {
+          _stateLog.warning(
+            '${item.fullPath}: orientação da miniatura=$thumbnailOrientation; '
+            'orientação do EXIF=$baseOrientation',
+          );
+        }
         displayBytes = baseOrientation == 1
             ? photo
             : writeOrientation(photo, 1) ?? photo;
@@ -372,9 +435,16 @@ class AppState extends ChangeNotifier {
         previewProgress = 1;
         _logOrientation(item.fullPath, mode: 'visualização');
         notifyListeners();
+        if (config.showInfoPanel && photoMetadata == null) {
+          unawaited(_parseAndStoreMetadata(item, photo));
+        }
       }
     } catch (error) {
       if (_isCurrentPreview(generation, item)) {
+        if (error is CardFileNotFoundException) {
+          await _markSelectedFileRemoved(item);
+          return;
+        }
         errorMessage =
             'Não foi possível carregar o arquivo: '
             '${_errorText(error)}';
@@ -384,7 +454,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<Uint8List?> loadThumbnail(
+  Future<ThumbResult?> loadThumbnail(
     CardItem item, {
     CancellationToken? cancellationToken,
   }) async {
@@ -392,12 +462,13 @@ class AppState extends ChangeNotifier {
       return null;
     }
 
+    final known = _thumbnailInfo[_metadataKey(item)];
     final cached = await cacheService.getThumb(
       item.fullPath,
       fileSize: item.size,
     );
     if (cached != null || (cancellationToken?.isCancelled ?? false)) {
-      return cached;
+      return known ?? (cached == null ? null : ThumbResult(bytes: cached));
     }
 
     final thumbnail = await cardClient.thumbnail(
@@ -405,13 +476,242 @@ class AppState extends ChangeNotifier {
       cancellationToken: cancellationToken,
     );
     if (thumbnail != null) {
+      _thumbnailInfo[_metadataKey(item)] = thumbnail;
       await cacheService.putThumb(
         item.fullPath,
-        thumbnail,
+        thumbnail.bytes,
         fileSize: item.size,
       );
     }
     return cancellationToken?.isCancelled ?? false ? null : thumbnail;
+  }
+
+  Future<void> setInfoPanelVisible(bool visible) async {
+    if (config.showInfoPanel == visible) return;
+    config = config.copyWith(showInfoPanel: visible);
+    notifyListeners();
+    try {
+      await configService.save(config);
+    } catch (error) {
+      errorMessage =
+          'Não foi possível salvar a preferência do painel: ${_errorText(error)}';
+      notifyListeners();
+    }
+    if (visible && selected?.isJpeg == true) {
+      unawaited(loadSelectedMetadata());
+    } else if (!visible) {
+      _cancelMetadataRequests();
+    }
+  }
+
+  Future<void> loadSelectedMetadata({bool force = false}) async {
+    final item = selected;
+    if (item == null || item.isDir) return;
+    if (!item.isJpeg) {
+      metadataStatus = MetadataLoadStatus.unsupported;
+      notifyListeners();
+      return;
+    }
+    if (!force &&
+        (metadataStatus == MetadataLoadStatus.loading ||
+            metadataStatus == MetadataLoadStatus.available)) {
+      return;
+    }
+
+    _metadataCancellationToken?.cancel();
+    final token = CancellationToken();
+    _metadataCancellationToken = token;
+    final generation = _previewGeneration;
+    metadataStatus = MetadataLoadStatus.loading;
+    metadataError = null;
+    selectedFileRemoved = false;
+    notifyListeners();
+
+    try {
+      final metadata = await _loadMetadata(item, token: token);
+      if (!_isCurrentPreview(generation, item) || token.isCancelled) return;
+      photoMetadata = metadata;
+      metadataStatus = metadata != null
+          ? MetadataLoadStatus.available
+          : cardClient.supportsRange
+          ? MetadataLoadStatus.noExif
+          : MetadataLoadStatus.rangeUnsupported;
+      notifyListeners();
+      if (config.showInfoPanel) _preloadMetadataNeighbors(item);
+    } on CardRequestCancelledException {
+      return;
+    } on CardFileNotFoundException {
+      if (_isCurrentPreview(generation, item)) {
+        await _markSelectedFileRemoved(item);
+      }
+    } on CardFileChangedException {
+      if (_isCurrentPreview(generation, item)) {
+        metadataStatus = MetadataLoadStatus.error;
+        metadataError = 'O arquivo mudou no cartão. A pasta foi atualizada.';
+        await loadDir(item.parentPath, force: true);
+        notifyListeners();
+      }
+    } catch (error) {
+      if (_isCurrentPreview(generation, item) && !token.isCancelled) {
+        metadataStatus = MetadataLoadStatus.error;
+        metadataError = _errorText(error);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadFullPhotoForMetadata() async {
+    final item = selected;
+    if (item == null || !item.isJpeg) return;
+    final generation = _previewGeneration;
+    metadataStatus = MetadataLoadStatus.loading;
+    metadataError = null;
+    notifyListeners();
+    try {
+      var bytes = originalBytes;
+      bytes ??= await cacheService.get(item.fullPath, fileSize: item.size);
+      bytes ??= await _download(item.fullPath);
+      await cacheService.put(item.fullPath, bytes, fileSize: item.size);
+      final metadata = await _parseAndStoreMetadata(item, bytes);
+      if (!_isCurrentPreview(generation, item)) return;
+      photoMetadata = metadata;
+      metadataStatus = metadata == null
+          ? MetadataLoadStatus.noExif
+          : MetadataLoadStatus.available;
+      notifyListeners();
+    } on CardFileNotFoundException {
+      if (_isCurrentPreview(generation, item)) {
+        await _markSelectedFileRemoved(item);
+      }
+    } catch (error) {
+      if (_isCurrentPreview(generation, item)) {
+        metadataStatus = MetadataLoadStatus.error;
+        metadataError = _errorText(error);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> openMetadataMap() async {
+    final metadata = photoMetadata;
+    if (metadata?.latitude == null || metadata?.longitude == null) return;
+    try {
+      await mapLauncher.open(metadata!.latitude!, metadata.longitude!);
+    } catch (error) {
+      errorMessage = 'Não foi possível abrir o mapa: $error';
+      notifyListeners();
+    }
+  }
+
+  Future<PhotoMetadata?> _loadMetadata(
+    CardItem item, {
+    CancellationToken? token,
+  }) async {
+    final key = _metadataKey(item);
+    final memory = _metadataCache[key];
+    if (memory != null) return memory;
+    final disk = await cacheService.getMetadata(
+      item.fullPath,
+      fileSize: item.size,
+    );
+    if (disk != null) {
+      _metadataCache[key] = disk;
+      return disk;
+    }
+
+    Uint8List? bytes;
+    if (selected?.fullPath == item.fullPath && originalBytes != null) {
+      bytes = originalBytes;
+    }
+    bytes ??= await cacheService.get(item.fullPath, fileSize: item.size);
+    if (bytes != null) return _parseAndStoreMetadata(item, bytes);
+    if (!item.isJpeg) return null;
+
+    final first = await cardClient.readHead(
+      item.fullPath,
+      expectedSize: item.size,
+      cancellationToken: token,
+    );
+    bytes = first.bytes;
+    final required = _requiredJpegHeaderBytes(bytes);
+    if (required != null &&
+        required > bytes.length &&
+        cardClient.supportsRange) {
+      final capped = required.clamp(bytes.length, 256 * 1024);
+      final remaining = capped - bytes.length;
+      if (remaining > 0) {
+        final rest = await cardClient.readHead(
+          item.fullPath,
+          start: bytes.length,
+          length: remaining,
+          expectedSize: item.size,
+          cancellationToken: token,
+        );
+        final joined = BytesBuilder(copy: false)
+          ..add(bytes)
+          ..add(rest.bytes);
+        bytes = joined.takeBytes();
+      }
+    }
+    if (token?.isCancelled ?? false) {
+      throw const CardRequestCancelledException();
+    }
+    return _parseAndStoreMetadata(item, bytes);
+  }
+
+  Future<PhotoMetadata?> _parseAndStoreMetadata(
+    CardItem item,
+    Uint8List bytes,
+  ) async {
+    final metadata = await parseMetadata(bytes);
+    if (metadata == null) return null;
+    _metadataCache[_metadataKey(item)] = metadata;
+    await cacheService.putMetadata(
+      item.fullPath,
+      metadata,
+      fileSize: item.size,
+    );
+    if (selected?.fullPath == item.fullPath) {
+      photoMetadata = metadata;
+      metadataStatus = MetadataLoadStatus.available;
+      notifyListeners();
+    }
+    return metadata;
+  }
+
+  void _preloadMetadataNeighbors(CardItem item) {
+    for (final token in _metadataPrefetchTokens) {
+      token.cancel();
+    }
+    _metadataPrefetchTokens.clear();
+    final files = _filesInFolder(item.parentPath)
+        .where((file) => file.isJpeg)
+        .toList();
+    final index = files.indexWhere((file) => file.fullPath == item.fullPath);
+    if (index < 0) return;
+    for (final neighborIndex in <int>[index - 1, index + 1]) {
+      if (neighborIndex < 0 || neighborIndex >= files.length) continue;
+      final neighbor = files[neighborIndex];
+      if (_metadataCache.containsKey(_metadataKey(neighbor))) continue;
+      final token = CancellationToken();
+      _metadataPrefetchTokens.add(token);
+      unawaited(
+        _loadMetadata(neighbor, token: token).catchError((Object _) => null),
+      );
+    }
+  }
+
+  Future<void> _markSelectedFileRemoved(CardItem item) async {
+    selectedFileRemoved = true;
+    metadataStatus = MetadataLoadStatus.removed;
+    metadataError = null;
+    previewBytes = null;
+    originalBytes = null;
+    displayBytes = null;
+    previewProgress = null;
+    errorMessage = 'O arquivo não existe mais no cartão.';
+    await loadDir(item.parentPath, force: true);
+    notifyListeners();
   }
 
   Future<List<String>> listWifiNetworks() async {
@@ -552,6 +852,8 @@ class AppState extends ChangeNotifier {
   Future<bool> clearCache() async {
     try {
       await cacheService.clear();
+      _metadataCache.clear();
+      _thumbnailInfo.clear();
       errorMessage = null;
       notifyListeners();
       return true;
@@ -659,6 +961,10 @@ class AppState extends ChangeNotifier {
       lastSaveRotationMode = mode == 'original' ? null : mode;
       return localPath;
     } catch (error) {
+      if (error is CardFileNotFoundException) {
+        await _markSelectedFileRemoved(item);
+        return null;
+      }
       errorMessage = 'Não foi possível salvar o arquivo: ${_errorText(error)}';
       return null;
     } finally {
@@ -749,6 +1055,8 @@ class AppState extends ChangeNotifier {
       }
 
       rotations.remove(item.fullPath);
+      _metadataCache.remove(_metadataKey(item));
+      _thumbnailInfo.remove(_metadataKey(item));
       await cacheService.remove(item.fullPath);
       await _selectAfterDeletion(item.parentPath, previousIndex);
       return true;
@@ -1075,6 +1383,8 @@ class AppState extends ChangeNotifier {
     }
 
     rotations.remove(pending.item.fullPath);
+    _metadataCache.remove(_metadataKey(pending.item));
+    _thumbnailInfo.remove(_metadataKey(pending.item));
     try {
       await cacheService.remove(pending.item.fullPath);
     } catch (error) {
@@ -1116,6 +1426,9 @@ class AppState extends ChangeNotifier {
       baseOrientation = 1;
       previewIsThumbnail = false;
       previewProgress = null;
+      photoMetadata = null;
+      metadataStatus = MetadataLoadStatus.idle;
+      selectedFileRemoved = false;
       notifyListeners();
       return;
     }
@@ -1175,6 +1488,13 @@ class AppState extends ChangeNotifier {
     rotations.clear();
     previewIsThumbnail = false;
     previewProgress = null;
+    thumbnailOrientation = null;
+    thumbnailWidth = null;
+    thumbnailHeight = null;
+    photoMetadata = null;
+    metadataStatus = MetadataLoadStatus.idle;
+    metadataError = null;
+    selectedFileRemoved = false;
     uploadEnabled = null;
     emptyFolders = <CardItem>[];
     scanProgress = (done: 0, total: 0);
@@ -1215,13 +1535,26 @@ class AppState extends ChangeNotifier {
       baseOrientation = 1;
       previewIsThumbnail = false;
       previewProgress = null;
+      photoMetadata = null;
+      metadataStatus = MetadataLoadStatus.idle;
+      selectedFileRemoved = false;
     }
   }
 
   void _invalidatePreview() {
     _thumbnailCancellationToken?.cancel();
     _thumbnailCancellationToken = null;
+    _cancelMetadataRequests();
     _previewGeneration++;
+  }
+
+  void _cancelMetadataRequests() {
+    _metadataCancellationToken?.cancel();
+    _metadataCancellationToken = null;
+    for (final token in _metadataPrefetchTokens) {
+      token.cancel();
+    }
+    _metadataPrefetchTokens.clear();
   }
 
   void _logOrientation(String path, {required String mode}) {
@@ -1269,6 +1602,10 @@ String _errorText(Object error) {
     CardUnreachableException() =>
       'Não foi possível alcançar o cartão. Verifique a conexão Wi-Fi e se a '
           'câmera está ligada.',
+    CardFileNotFoundException() => 'O arquivo não existe mais no cartão.',
+    CardFileChangedException() => 'O arquivo mudou no cartão.',
+    CardRangeUnsupportedException exception => exception.message,
+    CardRequestCancelledException exception => exception.message,
     CardParseException exception =>
       'O cartão enviou uma lista de arquivos inválida: ${exception.message}',
     CardHttpException exception =>
@@ -1278,6 +1615,32 @@ String _errorText(Object error) {
     ConfigServiceException() => 'Não foi possível acessar as configurações.',
     _ => error.toString(),
   };
+}
+
+String _metadataKey(CardItem item) => '${item.fullPath}\u0000${item.size}';
+
+int? _requiredJpegHeaderBytes(Uint8List bytes) {
+  if (bytes.length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) return null;
+  var offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] != 0xFF) return null;
+    final markerOffset = offset;
+    while (offset < bytes.length && bytes[offset] == 0xFF) {
+      offset++;
+    }
+    if (offset >= bytes.length) return null;
+    final marker = bytes[offset++];
+    if (marker == 0xDA || marker == 0xD9) return null;
+    if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
+    if (offset + 2 > bytes.length) return null;
+    final segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2) return null;
+    final segmentEnd = markerOffset + 2 + segmentLength;
+    if (marker == 0xE1) return segmentEnd;
+    if (segmentEnd > bytes.length) return segmentEnd;
+    offset = segmentEnd;
+  }
+  return null;
 }
 
 class _PendingDeletion {

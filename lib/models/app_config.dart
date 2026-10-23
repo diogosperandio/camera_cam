@@ -9,6 +9,7 @@ class AppConfig {
     this.snackBarSeconds = 15,
     this.rotateSaveMode = 'exif',
     this.autoCheckUpdates = true,
+    this.showInfoPanel = false,
     this.lastUpdateCheck,
     this.skippedVersion,
   });
@@ -24,6 +25,7 @@ class AppConfig {
   final int snackBarSeconds;
   final String rotateSaveMode;
   final bool autoCheckUpdates;
+  final bool showInfoPanel;
   final DateTime? lastUpdateCheck;
   final String? skippedVersion;
 
@@ -37,6 +39,7 @@ class AppConfig {
     int? snackBarSeconds,
     String? rotateSaveMode,
     bool? autoCheckUpdates,
+    bool? showInfoPanel,
     Object? lastUpdateCheck = _notProvided,
     Object? skippedVersion = _notProvided,
   }) {
@@ -54,6 +57,7 @@ class AppConfig {
         rotateSaveMode ?? this.rotateSaveMode,
       ),
       autoCheckUpdates: autoCheckUpdates ?? this.autoCheckUpdates,
+      showInfoPanel: showInfoPanel ?? this.showInfoPanel,
       lastUpdateCheck: identical(lastUpdateCheck, _notProvided)
           ? this.lastUpdateCheck
           : lastUpdateCheck as DateTime?,
@@ -74,6 +78,7 @@ class AppConfig {
       'snackBarSeconds': snackBarSeconds,
       'rotateSaveMode': rotateSaveMode,
       'autoCheckUpdates': autoCheckUpdates,
+      'showInfoPanel': showInfoPanel,
       'lastUpdateCheck': lastUpdateCheck?.toIso8601String(),
       'skippedVersion': skippedVersion,
     };
@@ -93,6 +98,7 @@ class AppConfig {
       snackBarSeconds: _clampSnackBarSeconds(json['snackBarSeconds']),
       rotateSaveMode: _validRotateSaveMode(json['rotateSaveMode']),
       autoCheckUpdates: json['autoCheckUpdates'] as bool? ?? true,
+      showInfoPanel: json['showInfoPanel'] as bool? ?? false,
       lastUpdateCheck: _parseDate(json['lastUpdateCheck']),
       skippedVersion: json['skippedVersion'] as String?,
     );

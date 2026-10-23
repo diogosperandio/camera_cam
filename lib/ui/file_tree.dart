@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/exif_orientation.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/metadata_format.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
 import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
@@ -151,7 +153,7 @@ class _FileTreeState extends State<FileTree> {
     final canOfferFolderDeletion =
         item.isDir && children != null && children.isEmpty;
 
-    return Material(
+    final content = Material(
       color: selected
           ? Theme.of(context).colorScheme.primaryContainer
           : Colors.transparent,
@@ -253,6 +255,25 @@ class _FileTreeState extends State<FileTree> {
         ),
       ),
     );
+    final metadata = state.cachedMetadataFor(item);
+    if (metadata == null || item.isDir) return content;
+    final camera = <String>[
+      if ((metadata.make ?? '').isNotEmpty) metadata.make!,
+      if ((metadata.model ?? '').isNotEmpty) metadata.model!,
+    ].join(' · ');
+    final exposure = <String>[
+      formatExposure(metadata.exposureTime),
+      formatAperture(metadata.aperture),
+      if (metadata.iso != null) 'ISO ${metadata.iso}',
+    ].where((value) => value.isNotEmpty).join(' · ');
+    final tooltip = <String>[
+      formatDateTime(metadata.dateOriginal),
+      camera,
+      exposure,
+    ].where((value) => value.isNotEmpty).join('\n');
+    return tooltip.isEmpty
+        ? content
+        : Tooltip(message: tooltip, child: content);
   }
 
   KeyEventResult _handleKeyEvent(
@@ -450,7 +471,7 @@ class _FileThumbnail extends StatefulWidget {
 class _FileThumbnailState extends State<_FileThumbnail> {
   Timer? _debounce;
   CancellationToken? _cancellationToken;
-  Uint8List? _bytes;
+  ThumbResult? _result;
 
   @override
   void initState() {
@@ -464,7 +485,7 @@ class _FileThumbnailState extends State<_FileThumbnail> {
     if (oldWidget.item.fullPath != widget.item.fullPath ||
         oldWidget.item.size != widget.item.size) {
       _cancelLoad();
-      _bytes = null;
+      _result = null;
       _scheduleLoad();
     }
   }
@@ -480,12 +501,12 @@ class _FileThumbnailState extends State<_FileThumbnail> {
       final token = CancellationToken();
       _cancellationToken = token;
       try {
-        final bytes = await context.read<AppState>().loadThumbnail(
+        final result = await context.read<AppState>().loadThumbnail(
           widget.item,
           cancellationToken: token,
         );
-        if (mounted && !token.isCancelled && bytes != null) {
-          setState(() => _bytes = bytes);
+        if (mounted && !token.isCancelled && result != null) {
+          setState(() => _result = result);
         }
       } catch (_) {
         // A ausência de miniatura não impede a navegação pelo arquivo.
@@ -502,7 +523,9 @@ class _FileThumbnailState extends State<_FileThumbnail> {
 
   @override
   Widget build(BuildContext context) {
-    final bytes = _bytes;
+    final result = _result;
+    final bytes = result?.bytes;
+    final orientation = orientationParts(result?.orientation ?? 1);
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: SizedBox.square(
@@ -512,15 +535,21 @@ class _FileThumbnailState extends State<_FileThumbnail> {
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: const Icon(Icons.image_outlined, size: 22),
               )
-            : Image.memory(
-                bytes,
-                cacheWidth: 80,
-                width: 40,
-                height: 40,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                errorBuilder: (_, _, _) =>
-                    const Icon(Icons.broken_image_outlined),
+            : RotatedBox(
+                quarterTurns: orientation.turns,
+                child: Transform.flip(
+                  flipX: orientation.flipH,
+                  child: Image.memory(
+                    bytes,
+                    cacheWidth: 80,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.broken_image_outlined),
+                  ),
+                ),
               ),
       ),
     );

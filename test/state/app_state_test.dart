@@ -7,6 +7,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/image_exporter.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/photo_metadata.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/user_prompter.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
@@ -992,6 +993,8 @@ class _FakeUserPrompter implements UserPrompter {
 }
 
 class _FakeCardClient implements CardClient {
+  @override
+  bool supportsRange = true;
   bool pingResult = true;
   int pingCalls = 0;
   bool? uploadResult = true;
@@ -1087,7 +1090,19 @@ class _FakeCardClient implements CardClient {
   }
 
   @override
-  Future<Uint8List?> thumbnail(
+  Future<HeadResult> readHead(
+    String path, {
+    int start = 0,
+    int length = 65536,
+    int? expectedSize,
+    CancellationToken? cancellationToken,
+  }) async => HeadResult(
+    bytes: downloadBytes[path] ?? Uint8List.fromList(<int>[0xFF, 0xD8]),
+    totalSize: expectedSize,
+  );
+
+  @override
+  Future<ThumbResult?> thumbnail(
     String path, {
     CancellationToken? cancellationToken,
   }) async => null;
@@ -1097,6 +1112,7 @@ class _FakeCacheService implements CacheService {
   final Map<String, Uint8List> photos = <String, Uint8List>{};
   final Map<String, Uint8List> thumbs = <String, Uint8List>{};
   final List<String> removedPaths = <String>[];
+  final Map<String, PhotoMetadata> metadata = <String, PhotoMetadata>{};
 
   @override
   int get maxSizeBytes => 500 * 1024 * 1024;
@@ -1105,6 +1121,7 @@ class _FakeCacheService implements CacheService {
   Future<void> clear() async {
     photos.clear();
     thumbs.clear();
+    metadata.clear();
   }
 
   @override
@@ -1116,6 +1133,12 @@ class _FakeCacheService implements CacheService {
   Future<Uint8List?> getThumb(String cardPath, {int? fileSize}) async {
     return thumbs[cardPath];
   }
+
+  @override
+  Future<PhotoMetadata?> getMetadata(
+    String cardPath, {
+    required int fileSize,
+  }) async => metadata[cardPath];
 
   @override
   Future<void> put(String cardPath, Uint8List bytes, {int? fileSize}) async {
@@ -1132,10 +1155,18 @@ class _FakeCacheService implements CacheService {
   }
 
   @override
+  Future<void> putMetadata(
+    String cardPath,
+    PhotoMetadata value, {
+    required int fileSize,
+  }) async => metadata[cardPath] = value;
+
+  @override
   Future<void> remove(String cardPath) async {
     removedPaths.add(cardPath);
     photos.remove(cardPath);
     thumbs.remove(cardPath);
+    metadata.remove(cardPath);
   }
 
   @override

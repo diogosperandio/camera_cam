@@ -5,6 +5,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/exif_orientation.dart';
 import 'package:toshiba_flashair_wifi_viewer/state/app_state.dart';
 import 'package:toshiba_flashair_wifi_viewer/ui/app_snackbar.dart';
 import 'package:toshiba_flashair_wifi_viewer/ui/file_tree.dart';
+import 'package:toshiba_flashair_wifi_viewer/ui/photo_info_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -47,6 +48,9 @@ class _PreviewPaneState extends State<PreviewPane> {
         const SingleActivator(LogicalKeyboardKey.keyR): state.rotateRight,
         const SingleActivator(LogicalKeyboardKey.keyR, shift: true):
             state.rotateLeft,
+        const SingleActivator(LogicalKeyboardKey.keyI): () {
+          unawaited(state.setInfoPanelVisible(!state.config.showInfoPanel));
+        },
       },
       child: Focus(
         focusNode: _focusNode,
@@ -70,7 +74,24 @@ class _PreviewPaneState extends State<PreviewPane> {
                           unawaited(confirmDeleteWithFeedback(context, state)),
                     ),
                     const Divider(height: 1),
-                    Expanded(child: _buildPreview(state, selected)),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Expanded(child: _buildPreview(state, selected)),
+                          if (state.config.showInfoPanel) ...<Widget>[
+                            const VerticalDivider(width: 1),
+                            SizedBox(
+                              width: 300,
+                              child: PhotoInfoPanel(
+                                state: state,
+                                item: selected,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
@@ -79,6 +100,9 @@ class _PreviewPaneState extends State<PreviewPane> {
   }
 
   Widget _buildPreview(AppState state, CardItem item) {
+    if (state.selectedFileRemoved) {
+      return const Center(child: Text('O arquivo foi removido do cartão.'));
+    }
     if (!item.isImage) {
       return const _UnsupportedPreview();
     }
@@ -174,6 +198,21 @@ class _PreviewHeader extends StatelessWidget {
         '${formatFileSize(item.size)} · ${formatDate(item.dateTime)}';
 
     final actions = <Widget>[
+      if (compact)
+        IconButton(
+          tooltip: 'Informações (I)',
+          isSelected: state.config.showInfoPanel,
+          onPressed: () =>
+              unawaited(state.setInfoPanelVisible(!state.config.showInfoPanel)),
+          icon: const Icon(Icons.info_outline),
+        )
+      else
+        TextButton.icon(
+          onPressed: () =>
+              unawaited(state.setInfoPanelVisible(!state.config.showInfoPanel)),
+          icon: const Icon(Icons.info_outline),
+          label: const Text('Informações'),
+        ),
       IconButton(
         tooltip: 'Girar à esquerda (Shift+R)',
         onPressed: state.canRotate ? state.rotateLeft : null,

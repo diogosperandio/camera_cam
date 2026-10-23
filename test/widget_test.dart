@@ -2,6 +2,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/photo_metadata.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/main.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
@@ -168,6 +169,12 @@ class _TestCacheService implements CacheService {
   Future<Uint8List?> getThumb(String cardPath, {int? fileSize}) async => null;
 
   @override
+  Future<PhotoMetadata?> getMetadata(
+    String cardPath, {
+    required int fileSize,
+  }) async => null;
+
+  @override
   Future<void> put(String cardPath, Uint8List bytes, {int? fileSize}) async {}
 
   @override
@@ -175,6 +182,13 @@ class _TestCacheService implements CacheService {
     String cardPath,
     Uint8List bytes, {
     int? fileSize,
+  }) async {}
+
+  @override
+  Future<void> putMetadata(
+    String cardPath,
+    PhotoMetadata metadata, {
+    required int fileSize,
   }) async {}
 
   @override

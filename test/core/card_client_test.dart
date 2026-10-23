@@ -124,11 +124,12 @@ void main() {
           );
           return http.StreamedResponse(
             Stream<List<int>>.fromIterable(<List<int>>[
-              <int>[1, 2],
+              <int>[0xFF, 0xD8],
               <int>[3],
             ]),
             200,
             contentLength: 3,
+            headers: <String, String>{'content-type': 'image/jpeg'},
           );
         }),
       );
@@ -138,7 +139,7 @@ void main() {
         onProgress: (received, _) => progress.add(received),
       );
 
-      expect(result, Uint8List.fromList(<int>[1, 2, 3]));
+      expect(result, Uint8List.fromList(<int>[0xFF, 0xD8, 3]));
       expect(progress, <int>[2, 3]);
     });
 
@@ -169,7 +170,7 @@ void main() {
         }),
       );
 
-      expect(await client.thumbnail('/DCIM/IMG 0001.JPG'), <int>[
+      expect((await client.thumbnail('/DCIM/IMG 0001.JPG'))?.bytes, <int>[
         0xFF,
         0xD8,
         0xFF,
@@ -193,7 +194,7 @@ void main() {
         }),
       );
 
-      final requests = List<Future<Uint8List?>>.generate(
+      final requests = List<Future<ThumbResult?>>.generate(
         5,
         (index) => client.thumbnail('/DCIM/$index.JPG'),
       );
@@ -218,7 +219,11 @@ void main() {
             await releaseFirstRequest.future;
           }
           if (request.url.path.endsWith('.JPG')) {
-            return http.Response.bytes(<int>[1, 2, 3], 200);
+            return http.Response.bytes(
+              <int>[0xFF, 0xD8, 3],
+              200,
+              headers: <String, String>{'content-type': 'image/jpeg'},
+            );
           }
           return http.Response.bytes(<int>[0xFF, 0xD8], 200);
         }),

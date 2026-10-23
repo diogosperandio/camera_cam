@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/photo_metadata.dart';
 
 class CacheService {
   CacheService({
@@ -53,10 +54,38 @@ class CacheService {
     );
   }
 
+  Future<PhotoMetadata?> getMetadata(String cardPath, {required int fileSize}) {
+    return _guard(CacheOperation.read, () async {
+      final bytes = await _get(_metadataDirectory, cardPath, fileSize);
+      if (bytes == null) return null;
+      final decoded = jsonDecode(utf8.decode(bytes));
+      return decoded is Map<String, dynamic>
+          ? PhotoMetadata.fromJson(decoded)
+          : null;
+    });
+  }
+
+  Future<void> putMetadata(
+    String cardPath,
+    PhotoMetadata metadata, {
+    required int fileSize,
+  }) {
+    return _guard(
+      CacheOperation.write,
+      () => _put(
+        _metadataDirectory,
+        cardPath,
+        Uint8List.fromList(utf8.encode(jsonEncode(metadata.toJson()))),
+        fileSize,
+      ),
+    );
+  }
+
   Future<void> remove(String cardPath) {
     return _guard(CacheOperation.remove, () async {
       await _removeVariants(await _photosDirectory(), cardPath);
       await _removeVariants(await _thumbsDirectory(), cardPath);
+      await _removeVariants(await _metadataDirectory(), cardPath);
     });
   }
 
@@ -65,14 +94,19 @@ class CacheService {
       final root = await _cacheRoot();
       final photos = Directory(path.join(root.path, 'photos'));
       final thumbs = Directory(path.join(root.path, 'thumbs'));
+      final metadata = Directory(path.join(root.path, 'metadata'));
       if (await photos.exists()) {
         await photos.delete(recursive: true);
       }
       if (await thumbs.exists()) {
         await thumbs.delete(recursive: true);
       }
+      if (await metadata.exists()) {
+        await metadata.delete(recursive: true);
+      }
       await photos.create(recursive: true);
       await thumbs.create(recursive: true);
+      await metadata.create(recursive: true);
     });
   }
 
@@ -177,7 +211,12 @@ class CacheService {
   Future<List<File>> _allCacheFiles() async {
     final photos = await _photosDirectory();
     final thumbs = await _thumbsDirectory();
-    return <File>[...await _files(photos), ...await _files(thumbs)];
+    final metadata = await _metadataDirectory();
+    return <File>[
+      ...await _files(photos),
+      ...await _files(thumbs),
+      ...await _files(metadata),
+    ];
   }
 
   Future<List<File>> _variants(Directory directory, String cardPath) async {
@@ -201,6 +240,8 @@ class CacheService {
   Future<Directory> _photosDirectory() => _subdirectory('photos');
 
   Future<Directory> _thumbsDirectory() => _subdirectory('thumbs');
+
+  Future<Directory> _metadataDirectory() => _subdirectory('metadata');
 
   Future<Directory> _subdirectory(String name) async {
     final root = await _cacheRoot();

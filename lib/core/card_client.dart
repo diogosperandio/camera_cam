@@ -87,6 +87,7 @@ class CardClient {
   Uri _baseUri;
   final http.Client _httpClient;
   final _RequestQueue _requestQueue;
+  bool supportsRange = true;
 
   void updateBaseUrl(String baseUrl) {
     _baseUri = Uri.parse(baseUrl);
@@ -106,11 +107,40 @@ class CardClient {
     );
   }
 
-  Future<Uint8List?> thumbnail(
+  Future<HeadResult> readHead(
+    String path, {
+    int start = 0,
+    int length = 65536,
+    int? expectedSize,
+    CancellationToken? cancellationToken,
+  }) async {
+    if (!supportsRange) {
+      throw const CardRangeUnsupportedException();
+    }
+    if (start < 0 || length < 1) {
+      throw ArgumentError('O intervalo solicitado é inválido.');
+    }
+    final result = await _requestQueue.schedule<HeadResult?>(
+      () => _readHead(
+        path,
+        start: start,
+        length: length,
+        expectedSize: expectedSize,
+        cancellationToken: cancellationToken,
+      ),
+      priority: _RequestPriority.low,
+      cancellationToken: cancellationToken,
+      onCancelled: () => null,
+    );
+    if (result == null) throw const CardRequestCancelledException();
+    return result;
+  }
+
+  Future<ThumbResult?> thumbnail(
     String path, {
     CancellationToken? cancellationToken,
   }) {
-    return _requestQueue.schedule<Uint8List?>(
+    return _requestQueue.schedule<ThumbResult?>(
       () => _thumbnail(path),
       priority: _RequestPriority.low,
       cancellationToken: cancellationToken,
@@ -183,9 +213,14 @@ class CardClient {
     _cardLog.info('HTTP GET $uri');
 
     try {
+      final request = http.Request('GET', uri)..followRedirects = false;
       final response = await _httpClient
-          .send(http.Request('GET', uri))
+          .send(request)
           .timeout(_downloadTimeout);
+      if (_isRedirect(response.statusCode)) {
+        await response.stream.drain<void>();
+        throw CardFileNotFoundException(uri);
+      }
       if (response.statusCode != HttpStatus.ok) {
         _cardLog.warning(
           'HTTP GET $uri -> ${response.statusCode} em ${stopwatch.elapsed}',
@@ -201,6 +236,9 @@ class CardClient {
         response,
         onProgress,
       ).timeout(remaining);
+      if (!_isImage(response.headers['content-type']) || !_isJpeg(bytes)) {
+        throw CardFileNotFoundException(uri);
+      }
       _cardLog.info(
         'HTTP GET $uri -> ${response.statusCode}, ${bytes.length} bytes '
         'em ${stopwatch.elapsed}',
@@ -218,7 +256,79 @@ class CardClient {
     }
   }
 
-  Future<Uint8List?> _thumbnail(String path) async {
+  Future<HeadResult> _readHead(
+    String path, {
+    required int start,
+    required int length,
+    required int? expectedSize,
+    required CancellationToken? cancellationToken,
+  }) async {
+    final uri = _cardPathUri(path);
+    final end = start + length - 1;
+    final request = http.Request('GET', uri)
+      ..followRedirects = false
+      ..headers[HttpHeaders.rangeHeader] = 'bytes=$start-$end';
+    try {
+      final response = await _httpClient.send(request).timeout(_requestTimeout);
+      if (_isRedirect(response.statusCode)) {
+        await response.stream.drain<void>();
+        throw CardFileNotFoundException(uri);
+      }
+      if (response.statusCode == HttpStatus.ok) {
+        supportsRange = false;
+        final bytes = await _readLimited(
+          response.stream,
+          length,
+          cancellationToken,
+        );
+        if (!_isImage(response.headers['content-type']) ||
+            (start == 0 && !_isJpeg(bytes))) {
+          throw CardFileNotFoundException(uri);
+        }
+        return HeadResult(bytes: bytes, totalSize: response.contentLength);
+      }
+      if (response.statusCode != HttpStatus.partialContent) {
+        await response.stream.drain<void>();
+        throw CardHttpException(response.statusCode, uri);
+      }
+      final range = _parseContentRange(response.headers['content-range']);
+      if (range == null || range.start != start || range.end > end) {
+        await response.stream.drain<void>();
+        throw const CardParseException('Content-Range inválido.');
+      }
+      if (expectedSize != null && range.total != expectedSize) {
+        await response.stream.drain<void>();
+        throw CardFileChangedException(expectedSize, range.total);
+      }
+      final bytes = await _readLimited(
+        response.stream,
+        length,
+        cancellationToken,
+      );
+      if (bytes.length != range.end - range.start + 1) {
+        throw const CardParseException('O segmento recebido está incompleto.');
+      }
+      if (!_isImage(response.headers['content-type']) ||
+          (start == 0 && !_isJpeg(bytes))) {
+        throw CardFileNotFoundException(uri);
+      }
+      _cardLog.info(
+        'Leitura parcial $path: bytes ${range.start}-${range.end}/${range.total} '
+        '(${bytes.length} bytes)',
+      );
+      return HeadResult(bytes: bytes, totalSize: range.total);
+    } on CardException {
+      rethrow;
+    } on TimeoutException catch (error) {
+      throw CardUnreachableException(uri, error);
+    } on SocketException catch (error) {
+      throw CardUnreachableException(uri, error);
+    } on http.ClientException catch (error) {
+      throw CardUnreachableException(uri, error);
+    }
+  }
+
+  Future<ThumbResult?> _thumbnail(String path) async {
     final uri = Uri.parse(
       '${_endpoint('/thumbnail.cgi')}?${_encodePath(path)}',
     );
@@ -231,7 +341,12 @@ class CardClient {
     if (bytes.length < 2 || bytes[0] != 0xFF || bytes[1] != 0xD8) {
       return null;
     }
-    return bytes;
+    return ThumbResult(
+      bytes: bytes,
+      width: _positiveInt(response.headers['x-exif-width']),
+      height: _positiveInt(response.headers['x-exif-height']),
+      orientation: _orientation(response.headers['x-exif-orientation']),
+    );
   }
 
   Future<bool?> _isUploadEnabled() async {
@@ -398,6 +513,25 @@ class CancellationToken {
   }
 }
 
+class HeadResult {
+  const HeadResult({required this.bytes, required this.totalSize});
+  final Uint8List bytes;
+  final int? totalSize;
+}
+
+class ThumbResult {
+  const ThumbResult({
+    required this.bytes,
+    this.width,
+    this.height,
+    this.orientation,
+  });
+  final Uint8List bytes;
+  final int? width;
+  final int? height;
+  final int? orientation;
+}
+
 sealed class CardException implements Exception {
   const CardException(this.message);
 
@@ -425,6 +559,28 @@ class CardHttpException extends CardException {
 
   final int statusCode;
   final Uri uri;
+}
+
+class CardFileNotFoundException extends CardException {
+  CardFileNotFoundException(this.uri)
+    : super('O arquivo não existe mais no cartão.');
+  final Uri uri;
+}
+
+class CardFileChangedException extends CardException {
+  CardFileChangedException(this.expectedSize, this.actualSize)
+    : super('O arquivo mudou desde a última listagem.');
+  final int expectedSize;
+  final int actualSize;
+}
+
+class CardRangeUnsupportedException extends CardException {
+  const CardRangeUnsupportedException()
+    : super('O cartão não oferece download parcial nesta sessão.');
+}
+
+class CardRequestCancelledException extends CardException {
+  const CardRequestCancelledException() : super('A solicitação foi cancelada.');
 }
 
 class CardDeleteException extends CardException {
@@ -599,6 +755,92 @@ Future<Uint8List> _readDownload(
     onProgress?.call(receivedBytes, response.contentLength);
   }
   return bytes.takeBytes();
+}
+
+Future<Uint8List> _readLimited(
+  Stream<List<int>> stream,
+  int limit,
+  CancellationToken? cancellationToken,
+) {
+  final completer = Completer<Uint8List>();
+  final bytes = BytesBuilder(copy: false);
+  late final StreamSubscription<List<int>> subscription;
+  late final void Function() cancelListener;
+  var completed = false;
+
+  Future<void> finish() async {
+    if (completed) return;
+    completed = true;
+    cancellationToken?._removeListener(cancelListener);
+    await subscription.cancel();
+    completer.complete(bytes.takeBytes());
+  }
+
+  Future<void> cancel() async {
+    if (completed) return;
+    completed = true;
+    cancellationToken?._removeListener(cancelListener);
+    await subscription.cancel();
+    completer.completeError(const CardRequestCancelledException());
+  }
+
+  subscription = stream.listen(
+    (chunk) {
+      if (completed) return;
+      final remaining = limit - bytes.length;
+      if (remaining > 0) {
+        bytes.add(
+          chunk.length <= remaining ? chunk : chunk.sublist(0, remaining),
+        );
+      }
+      if (bytes.length >= limit) unawaited(finish());
+    },
+    onError: (Object error, StackTrace stack) {
+      if (completed) return;
+      completed = true;
+      cancellationToken?._removeListener(cancelListener);
+      completer.completeError(error, stack);
+    },
+    onDone: () {
+      if (completed) return;
+      completed = true;
+      cancellationToken?._removeListener(cancelListener);
+      completer.complete(bytes.takeBytes());
+    },
+    cancelOnError: true,
+  );
+  cancelListener = () => unawaited(cancel());
+  cancellationToken?._addListener(cancelListener);
+  return completer.future;
+}
+
+({int start, int end, int total})? _parseContentRange(String? value) {
+  if (value == null) return null;
+  final match = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(value.trim());
+  if (match == null) return null;
+  final start = int.parse(match[1]!);
+  final end = int.parse(match[2]!);
+  final total = int.parse(match[3]!);
+  if (end < start || total <= end) return null;
+  return (start: start, end: end, total: total);
+}
+
+bool _isRedirect(int statusCode) => statusCode >= 300 && statusCode < 400;
+
+bool _isImage(String? contentType) =>
+    contentType?.toLowerCase().startsWith('image/') ?? false;
+
+bool _isJpeg(List<int> bytes) =>
+    bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+
+int? _positiveInt(String? value) {
+  final number = int.tryParse(value ?? '');
+  return number != null && number > 0 ? number : null;
+}
+
+int? _orientation(String? value) {
+  final number = int.tryParse(value ?? '');
+  return number != null && number >= 1 && number <= 8 ? number : null;
 }
 
 String _encodePath(String path) {

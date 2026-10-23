@@ -4,6 +4,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/cache_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/metadata/photo_metadata.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/card_item.dart';
@@ -181,6 +182,8 @@ class _Fixture {
 
 class _FakeCardClient implements CardClient {
   @override
+  bool supportsRange = true;
+  @override
   Future<int> countFiles(String dir) async => 0;
 
   @override
@@ -223,7 +226,16 @@ class _FakeCardClient implements CardClient {
   Future<bool> ping() async => true;
 
   @override
-  Future<Uint8List?> thumbnail(
+  Future<HeadResult> readHead(
+    String path, {
+    int start = 0,
+    int length = 65536,
+    int? expectedSize,
+    CancellationToken? cancellationToken,
+  }) async => HeadResult(bytes: _imageBytes, totalSize: expectedSize);
+
+  @override
+  Future<ThumbResult?> thumbnail(
     String path, {
     CancellationToken? cancellationToken,
   }) async => null;
@@ -269,6 +281,12 @@ class _MemoryCacheService implements CacheService {
   Future<Uint8List?> getThumb(String cardPath, {int? fileSize}) async => null;
 
   @override
+  Future<PhotoMetadata?> getMetadata(
+    String cardPath, {
+    required int fileSize,
+  }) async => null;
+
+  @override
   Future<void> put(String cardPath, Uint8List bytes, {int? fileSize}) async {}
 
   @override
@@ -276,6 +294,13 @@ class _MemoryCacheService implements CacheService {
     String cardPath,
     Uint8List bytes, {
     int? fileSize,
+  }) async {}
+
+  @override
+  Future<void> putMetadata(
+    String cardPath,
+    PhotoMetadata metadata, {
+    required int fileSize,
   }) async {}
 
   @override
