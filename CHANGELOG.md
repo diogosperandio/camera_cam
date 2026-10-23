@@ -2,6 +2,12 @@
 
 Todas as mudanças notáveis deste projeto ficam neste arquivo.
 
+## [1.0.10] - 2026-10-23
+
+### Alterações
+- Update - some fix
+- Update - Metadata info
+
 ## [1.0.9] - 2026-10-23
 
 ### Alterações
