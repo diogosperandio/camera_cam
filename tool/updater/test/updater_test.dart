@@ -5,6 +5,13 @@ import 'package:toshiba_flashair_wifi_viewer_updater/updater.dart';
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 
+final String _appExecutableName = Platform.isWindows
+    ? 'toshiba_flashair_wifi_viewer.exe'
+    : 'toshiba_flashair_wifi_viewer';
+final String _updaterExecutableName = Platform.isWindows
+    ? 'toshiba_flashair_wifi_viewer_updater.exe'
+    : 'toshiba_flashair_wifi_viewer_updater';
+
 void main() {
   group('parser', () {
     test('rejects missing, extra, invalid pid and wrong flag', () {
@@ -90,7 +97,7 @@ void main() {
       await fixture.resetArchive();
       await fixture.writeEntries(fixture.archive, <ArchiveFile>[
         ArchiveFile.string('portable.txt', 'ok'),
-        ArchiveFile.string('toshiba_flashair_wifi_viewer_updater', 'helper'),
+        ArchiveFile.string(_updaterExecutableName, 'helper'),
       ]);
       expect(await fixture.run(), 1);
       expect(await fixture.executable.readAsString(), 'old');
@@ -194,22 +201,16 @@ class _Fixture {
     final updates = Directory(path.join(root.path, 'cache', 'updates'))
       ..createSync(recursive: true);
     final helper =
-        File(
-            path.join(
-              updates.path,
-              'helper',
-              'toshiba_flashair_wifi_viewer_updater',
-            ),
-          )
+        File(path.join(updates.path, 'helper', _updaterExecutableName))
           ..createSync(recursive: true)
           ..writeAsStringSync('helper');
     final app = Directory(path.join(root.path, 'Aplicativo com espaço'))
       ..createSync();
-    final executable = File(path.join(app.path, 'toshiba_flashair_wifi_viewer'))
+    final executable = File(path.join(app.path, _appExecutableName))
       ..writeAsStringSync('old');
     final portable = File(path.join(app.path, 'portable.txt'))
       ..writeAsStringSync('portable');
-    File(path.join(app.path, 'toshiba_flashair_wifi_viewer_updater'))
+    File(path.join(app.path, _updaterExecutableName))
         .writeAsStringSync('old helper');
     return _Fixture(
       root,
@@ -234,7 +235,7 @@ class _Fixture {
       '--finish-update',
       '999999',
       app.path,
-      'toshiba_flashair_wifi_viewer',
+      _appExecutableName,
       (archive ?? this.archive).path,
       staging.path,
       log.path,
@@ -256,9 +257,9 @@ class _Fixture {
     File target, {
     List<ArchiveFile> extraEntries = const <ArchiveFile>[],
   }) => writeEntries(target, <ArchiveFile>[
-    ArchiveFile.string('toshiba_flashair_wifi_viewer', 'new'),
+    ArchiveFile.string(_appExecutableName, 'new'),
     ArchiveFile.string('portable.txt', 'portable'),
-    ArchiveFile.string('toshiba_flashair_wifi_viewer_updater', 'new helper'),
+    ArchiveFile.string(_updaterExecutableName, 'new helper'),
     ...extraEntries,
   ]);
 
