@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/update/install_kind.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
 
@@ -55,9 +56,8 @@ class UpdateInstaller implements UpdateInstallation {
       File(path.join(updateDirectory.path, 'data', 'just_updated.txt'));
   File get logFile => File(path.join(updateDirectory.path, 'update.log'));
 
-  String get _helperName => platform == 'windows'
-      ? 'toshiba_flashair_wifi_viewer_updater.exe'
-      : 'toshiba_flashair_wifi_viewer_updater';
+  String get _helperName =>
+      platform == 'windows' ? '$updaterName.exe' : updaterName;
 
   @override
   Future<InstallDetection> detect() => detectInstall(
@@ -109,7 +109,7 @@ class UpdateInstaller implements UpdateInstallation {
     _log.info('Iniciando auxiliar: pid=$pid; argumentos=$arguments');
     try {
       final environment = Map<String, String>.of(Platform.environment)
-        ..remove('toshiba_flashair_wifi_viewer_PRETEND_VERSION');
+        ..remove(pretendVarName);
       await _detachedStarter(helper.path, arguments, environment: environment);
     } catch (error) {
       if (await markerFile.exists()) await markerFile.delete();

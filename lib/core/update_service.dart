@@ -85,8 +85,8 @@ class UpdateService implements UpdateRepository {
       }
 
       final expectedName = switch (platform) {
-        'linux' => 'toshiba_flashair_wifi_viewer-$tag-linux-x64.tar.gz',
-        'windows' => 'toshiba_flashair_wifi_viewer-$tag-windows-x64.zip',
+        'linux' => '$assetPrefix-$tag-linux-x64.tar.gz',
+        'windows' => '$assetPrefix-$tag-windows-x64.zip',
         _ => '',
       };
       Map<String, dynamic>? asset;
@@ -312,7 +312,7 @@ class UpdateService implements UpdateRepository {
   Map<String, String> get _headers => const <String, String>{
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'Toshiba Flashair WiFi Viewer',
+    'User-Agent': appName,
   };
 }
 

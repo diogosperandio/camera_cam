@@ -107,8 +107,8 @@ Future<int> runUpdater(
     await _extract(parsed.archive, unpacked);
     final source = await _bundleRoot(unpacked);
     final helperName = Platform.isWindows
-        ? 'ezshare_updater.exe'
-        : 'ezshare_updater';
+        ? 'toshiba_flashair_wifi_viewer_updater.exe'
+        : 'toshiba_flashair_wifi_viewer_updater';
     for (final requiredName in <String>[
       parsed.exeName,
       'portable.txt',
@@ -176,7 +176,7 @@ Future<int> runUpdater(
       }
       try {
         final environment = Map<String, String>.of(Platform.environment)
-          ..remove('EZSHARE_PRETEND_VERSION');
+          ..remove('TOSHIBA_FLASHAIR_WIFI_VIEWER_PRETEND_VERSION');
         final executable = path.join(parsed.appDir.path, parsed.exeName);
         if (restarter != null) {
           await restarter(executable, environment);

@@ -5,6 +5,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/card_client.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/log_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/preferences_migration.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/update_installer.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/update_service.dart';
@@ -25,6 +26,12 @@ Future<void> main() async {
     await AppLog.initialize();
   } catch (error) {
     debugPrint('Não foi possível iniciar o log em arquivo: $error');
+  }
+  var importedPreviousSettings = false;
+  try {
+    importedPreviousSettings = await PreferencesMigration().migrateIfNeeded();
+  } catch (error) {
+    debugPrint('Não foi possível importar as configurações anteriores: $error');
   }
   final navigatorKey = GlobalKey<NavigatorState>();
   final state = AppState(
@@ -60,6 +67,9 @@ Future<void> main() async {
   );
   unawaited(() async {
     await state.init();
+    if (importedPreviousSettings) {
+      state.showNotice('Configurações da versão anterior importadas');
+    }
     await updateController.init();
   }());
 }
@@ -111,7 +121,7 @@ class _CameraCamAppState extends State<CameraCamApp> {
       child: MaterialApp(
         navigatorKey: widget.navigatorKey,
         debugShowCheckedModeBanner: false,
-        title: 'Toshiba FlashAir WiFi Viewer',
+        title: appName,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
           useMaterial3: true,

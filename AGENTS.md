@@ -1,4 +1,5 @@
-Você é um desenvolvedor Flutter sênior. Vamos construir, em etapas, um app desktop
+Você é um desenvolvedor Flutter sênior. Vamos construir, em etapas, o aplicativo
+Toshiba FlashAir WiFi Viewer para desktop
 (Linux e Windows) para navegar, baixar e apagar fotos de uma câmera Nikon com cartão
 Wi-Fi Toshiba FlashAir.
 

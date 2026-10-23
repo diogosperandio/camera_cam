@@ -1,6 +1,7 @@
-# camera_cam
+# Toshiba FlashAir WiFi Viewer
 
-A new Flutter project.
+Aplicativo desktop para Linux e Windows que navega, visualiza, salva e gerencia
+fotos de uma câmera com cartão Wi-Fi Toshiba FlashAir.
 
 ## Getting Started
 

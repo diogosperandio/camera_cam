@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/version_utils.dart';
 
 enum InstallKind { portable, unsupported }
@@ -26,15 +27,15 @@ Future<InstallDetection> detectInstall({
     return (InstallKind.unsupported, 'instalação sem portable.txt');
   }
   final helperName = (platform ?? Platform.operatingSystem) == 'windows'
-      ? 'ezshare_updater.exe'
-      : 'ezshare_updater';
+      ? '$updaterName.exe'
+      : updaterName;
   if (!await File(path.join(appDir.path, helperName)).exists()) {
     return (InstallKind.unsupported, 'auxiliar ausente');
   }
   final probe = File(
     path.join(
       appDir.path,
-      '.ezshare_write_test_${DateTime.now().microsecondsSinceEpoch}',
+      '.$appSlug-write-test-${DateTime.now().microsecondsSinceEpoch}',
     ),
   );
   try {
@@ -53,7 +54,6 @@ String effectiveCurrentVersion(
   String packageVersion, {
   Map<String, String>? environment,
 }) {
-  final pretend =
-      (environment ?? Platform.environment)['EZSHARE_PRETEND_VERSION'];
+  final pretend = (environment ?? Platform.environment)[pretendVarName];
   return parseVersion(pretend ?? '')?.toString() ?? packageVersion;
 }

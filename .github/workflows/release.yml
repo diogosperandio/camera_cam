@@ -19,7 +19,7 @@ env:
   APP_SLUG: toshiba_flashair_wifi_viewer
   # Nome do auxiliar de atualização (Etapa 17).
   UPDATER_NAME: toshiba_flashair_wifi_viewer_updater
-  PORTABLE_TEXT: "Instalação portátil do Toshiba FlashAir Wifi Viewer. Não apague: permite a atualização automática."
+  PORTABLE_TEXT: "Instalação portátil do Toshiba FlashAir WiFi Viewer. Não apague: permite a atualização automática."
 
 jobs:
   create-release:
@@ -50,7 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          title="Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME"
+          title="Toshiba FlashAir WiFi Viewer $GITHUB_REF_NAME"
           if grep -q '[^[:space:]]' notes.md; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
               --title "$title" --notes-file notes.md --draft

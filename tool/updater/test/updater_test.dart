@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:archive/archive.dart';
-import 'package:ezshare_updater/updater.dart';
+import 'package:toshiba_flashair_wifi_viewer_updater/updater.dart';
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 
@@ -90,7 +90,7 @@ void main() {
       await fixture.resetArchive();
       await fixture.writeEntries(fixture.archive, <ArchiveFile>[
         ArchiveFile.string('portable.txt', 'ok'),
-        ArchiveFile.string('ezshare_updater', 'helper'),
+        ArchiveFile.string('toshiba_flashair_wifi_viewer_updater', 'helper'),
       ]);
       expect(await fixture.run(), 1);
       expect(await fixture.executable.readAsString(), 'old');
@@ -193,16 +193,23 @@ class _Fixture {
     );
     final updates = Directory(path.join(root.path, 'cache', 'updates'))
       ..createSync(recursive: true);
-    final helper = File(path.join(updates.path, 'helper', 'ezshare_updater'))
-      ..createSync(recursive: true)
-      ..writeAsStringSync('helper');
+    final helper =
+        File(
+            path.join(
+              updates.path,
+              'helper',
+              'toshiba_flashair_wifi_viewer_updater',
+            ),
+          )
+          ..createSync(recursive: true)
+          ..writeAsStringSync('helper');
     final app = Directory(path.join(root.path, 'Aplicativo com espaço'))
       ..createSync();
-    final executable = File(path.join(app.path, 'ezshare_viewer'))
+    final executable = File(path.join(app.path, 'toshiba_flashair_wifi_viewer'))
       ..writeAsStringSync('old');
     final portable = File(path.join(app.path, 'portable.txt'))
       ..writeAsStringSync('portable');
-    File(path.join(app.path, 'ezshare_updater'))
+    File(path.join(app.path, 'toshiba_flashair_wifi_viewer_updater'))
         .writeAsStringSync('old helper');
     return _Fixture(
       root,
@@ -227,7 +234,7 @@ class _Fixture {
       '--finish-update',
       '999999',
       app.path,
-      'ezshare_viewer',
+      'toshiba_flashair_wifi_viewer',
       (archive ?? this.archive).path,
       staging.path,
       log.path,
@@ -237,7 +244,10 @@ class _Fixture {
     waitTimeout: waitTimeout,
     delay: (_) async {},
     restarter: (_, environment) async {
-      expect(environment.containsKey('EZSHARE_PRETEND_VERSION'), isFalse);
+      expect(
+        environment.containsKey('TOSHIBA_FLASHAIR_WIFI_VIEWER_PRETEND_VERSION'),
+        isFalse,
+      );
     },
     copyFile: copyFile,
   );
@@ -246,9 +256,9 @@ class _Fixture {
     File target, {
     List<ArchiveFile> extraEntries = const <ArchiveFile>[],
   }) => writeEntries(target, <ArchiveFile>[
-    ArchiveFile.string('ezshare_viewer', 'new'),
+    ArchiveFile.string('toshiba_flashair_wifi_viewer', 'new'),
     ArchiveFile.string('portable.txt', 'portable'),
-    ArchiveFile.string('ezshare_updater', 'new helper'),
+    ArchiveFile.string('toshiba_flashair_wifi_viewer_updater', 'new helper'),
     ...extraEntries,
   ]);
 

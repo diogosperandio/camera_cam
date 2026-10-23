@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
 
 class AppLog {
   AppLog._();
@@ -19,7 +20,7 @@ class AppLog {
     final directory =
         supportDirectory ?? await getApplicationSupportDirectory();
     await directory.create(recursive: true);
-    _file = File(path.join(directory.path, 'camera_cam.log'));
+    _file = File(path.join(directory.path, '$appSlug.log'));
     Logger.root.level = Level.ALL;
     _subscription = Logger.root.onRecord.listen(_writeRecord);
     Logger('App').info('Logging iniciado em ${_file!.path}');

@@ -200,17 +200,17 @@ void main() {
 
 Map<String, Object> _releaseJson({String tag = 'v1.0.3'}) => <String, Object>{
   'tag_name': tag,
-  'name': 'EZ Share Viewer $tag',
+  'name': 'Toshiba FlashAir WiFi Viewer $tag',
   'html_url': 'https://github.com/OWNER/REPO/releases/tag/$tag',
   'body': '## Novidades\n- Girar foto 90 graus',
   'draft': false,
   'prerelease': false,
   'assets': <Object>[
     for (final name in <String>[
-      'ezshare_viewer-v1.0.3-linux-x64.tar.gz',
-      'ezshare_viewer-v1.0.3-linux-x64.tar.gz.sha256',
-      'ezshare_viewer-v1.0.3-windows-x64.zip',
-      'ezshare_viewer-v1.0.3-windows-x64.zip.sha256',
+      'toshiba_flashair_wifi_viewer-v1.0.3-linux-x64.tar.gz',
+      'toshiba_flashair_wifi_viewer-v1.0.3-linux-x64.tar.gz.sha256',
+      'toshiba_flashair_wifi_viewer-v1.0.3-windows-x64.zip',
+      'toshiba_flashair_wifi_viewer-v1.0.3-windows-x64.zip.sha256',
     ])
       <String, Object>{
         'name': name,

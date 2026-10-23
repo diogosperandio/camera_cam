@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Testar atualização (Linux)",
+      "type": "shell",
+      "command": "${workspaceFolder}/tool/test_update.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Testar atualização (Windows)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tool\\test_update.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Testes do auxiliar",
+      "type": "shell",
+      "command": "dart",
+      "args": ["test"],
+      "options": {
+        "cwd": "${workspaceFolder}/tool/updater"
+      },
+      "problemMatcher": ["$dart-test"]
+    }
+  ]
+}

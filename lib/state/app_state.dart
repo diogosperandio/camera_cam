@@ -128,6 +128,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void showNotice(String message) {
+    noticeMessage = message;
+    notifyListeners();
+  }
+
   Future<void> connect() async {
     final ssid = config.ssid?.trim();
     if (ssid == null || ssid.isEmpty) {
