@@ -8,7 +8,7 @@ void main() {
     expect(formatExposure(2), '2 s');
     expect(formatAperture(5.6), 'f/5,6');
     expect(formatExposureBias(0.3), '+0,3 EV');
-    expect(formatExposureBias(-1), '−1 EV');
+    expect(formatExposureBias(-1), '−1,0 EV');
     expect(formatExposureBias(0), '0 EV');
     expect(
       formatFocalLength(10, equivalent35mm: 27),

@@ -34,13 +34,13 @@ String formatExposureBias(double? value) {
   if (value == null || !value.isFinite) return '';
   if (value.abs() < 0.0005) return '0 EV';
   final prefix = value > 0 ? '+' : '−';
-  return '$prefix${_decimal(value.abs(), maximumFractionDigits: 1)} EV';
+  return '$prefix${_fixed(value.abs(), 1)} EV';
 }
 
 String formatDimensions(int? width, int? height) {
   if (width == null || height == null || width <= 0 || height <= 0) return '';
   final megapixels = width * height / 1000000;
-  return '$width × $height (${_decimal(megapixels, maximumFractionDigits: 1)} MP)';
+  return '$width × $height (${_fixed(megapixels, 1)} MP)';
 }
 
 String formatOrientation(int? orientation, {int manualQuarterTurns = 0}) {
