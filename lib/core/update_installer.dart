@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
-import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
+import 'package:toshiba_flashair_wifi_viewer/core/update/install_kind.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
 
 typedef ProcessRunner = Future<ProcessResult> Function(
   String executable,
@@ -11,13 +11,14 @@ typedef ProcessRunner = Future<ProcessResult> Function(
 );
 typedef DetachedProcessStarter = Future<Process> Function(
   String executable,
-  List<String> arguments,
-);
+  List<String> arguments, {
+  Map<String, String>? environment,
+});
 
 abstract interface class UpdateInstallation {
   Directory get updateDirectory;
-  Future<({bool ok, String? reason})> canInstall();
-  Future<void> prepareAndLaunch(File archive);
+  Future<InstallDetection> detect();
+  Future<void> install(UpdateInfo info, File archive);
   Future<String?> consumePreviousLog();
   Future<void> openReleasePage(String url);
 }
@@ -26,149 +27,107 @@ class UpdateInstaller implements UpdateInstallation {
   UpdateInstaller({
     String? platform,
     String? executablePath,
-    Map<String, String>? environment,
-    bool? developmentMode,
-    Directory? temporaryDirectory,
+    Directory? cacheDirectory,
+    this.developmentMode,
     ProcessRunner? processRunner,
     DetachedProcessStarter? detachedStarter,
+    DateTime Function()? now,
   }) : platform = platform ?? Platform.operatingSystem,
        executablePath = executablePath ?? Platform.resolvedExecutable,
-       environment = environment ?? Platform.environment,
-       developmentMode = developmentMode ?? (kDebugMode || kProfileMode),
-       temporaryDirectory = temporaryDirectory ?? Directory.systemTemp,
+       cacheDirectory = cacheDirectory ?? Directory.systemTemp,
        _processRunner = processRunner ?? _runProcess,
-       _detachedStarter = detachedStarter ?? _startDetached;
+       _detachedStarter = detachedStarter ?? _startDetached,
+       _now = now ?? DateTime.now;
 
   final String platform;
   final String executablePath;
-  final Map<String, String> environment;
-  final bool developmentMode;
-  final Directory temporaryDirectory;
+  final Directory cacheDirectory;
+  final bool? developmentMode;
   final ProcessRunner _processRunner;
   final DetachedProcessStarter _detachedStarter;
+  final DateTime Function() _now;
   final Logger _log = Logger('UpdateInstaller');
 
   @override
   Directory get updateDirectory =>
-      Directory(path.join(temporaryDirectory.path, 'ezshare_update'));
+      Directory(path.join(cacheDirectory.path, 'updates'));
+  File get markerFile =>
+      File(path.join(updateDirectory.path, 'data', 'just_updated.txt'));
+  File get logFile => File(path.join(updateDirectory.path, 'update.log'));
+
+  String get _helperName => platform == 'windows'
+      ? 'toshiba_flashair_wifi_viewer_updater.exe'
+      : 'toshiba_flashair_wifi_viewer_updater';
 
   @override
-  Future<({bool ok, String? reason})> canInstall() async {
-    if (developmentMode) {
-      return (ok: false, reason: 'modo de desenvolvimento');
-    }
-    if (platform == 'linux' && (environment['APPIMAGE']?.isNotEmpty ?? false)) {
-      return (ok: false, reason: 'AppImage');
-    }
-    final installDirectory = File(executablePath).parent;
-    final probe = File(
-      path.join(
-        installDirectory.path,
-        '.ezshare_write_test_${DateTime.now().microsecondsSinceEpoch}',
-      ),
-    );
-    try {
-      await probe.writeAsString('test', flush: true);
-      await probe.delete();
-    } catch (_) {
-      if (await probe.exists()) {
-        try {
-          await probe.delete();
-        } catch (_) {}
-      }
-      return (ok: false, reason: 'instalado em local protegido');
-    }
-    return (ok: true, reason: null);
-  }
+  Future<InstallDetection> detect() => detectInstall(
+    executablePath: executablePath,
+    platform: platform,
+    developmentMode: developmentMode,
+  );
 
   @override
-  Future<void> prepareAndLaunch(File archive) async {
-    final allowed = await canInstall();
-    if (!allowed.ok) throw UpdateInstallException(allowed.reason!);
-    final root = updateDirectory;
-    final staging = Directory(path.join(root.path, 'staging'));
-    final backup = Directory(path.join(root.path, 'backup'));
-    await root.create(recursive: true);
-    await _recreate(staging);
-    await _recreate(backup);
-
-    final extraction = platform == 'windows'
-        ? await _processRunner('powershell', <String>[
-            '-NoProfile',
-            '-Command',
-            'Expand-Archive -LiteralPath ${_powershellQuote(archive.path)} '
-                '-DestinationPath ${_powershellQuote(staging.path)} -Force',
-          ])
-        : await _processRunner('tar', <String>[
-            '-xzf',
-            archive.path,
-            '-C',
-            staging.path,
-          ]);
-    if (extraction.exitCode != 0) {
-      await _deleteTree(root);
-      throw UpdateInstallException('Não foi possível extrair a atualização.');
-    }
-
-    final executableName = platform == 'windows'
-        ? '$appBinaryName.exe'
-        : appBinaryName;
-    final stagedExecutable = File(path.join(staging.path, executableName));
-    if (!await stagedExecutable.exists()) {
-      await _deleteTree(root);
+  Future<void> install(UpdateInfo info, File archive) async {
+    final detection = await detect();
+    if (detection.kind != InstallKind.portable) {
       throw UpdateInstallException(
-        'O pacote não contém o executável esperado.',
+        detection.reason ?? 'atualização automática indisponível',
       );
     }
-
-    final installation = File(executablePath).parent;
-    await _copyDirectory(installation, backup);
-    final processId = pid;
-    final script = platform == 'windows'
-        ? File(path.join(root.path, 'update.bat'))
-        : File(path.join(root.path, 'update.sh'));
-    final contents = platform == 'windows'
-        ? buildWindowsScript(
-            pid: processId,
-            stagingPath: staging.path,
-            installPath: installation.path,
-            backupPath: backup.path,
-            executablePath: executablePath,
-            logPath: path.join(root.path, 'update.log'),
-          )
-        : buildLinuxScript(
-            pid: processId,
-            stagingPath: staging.path,
-            installPath: installation.path,
-            backupPath: backup.path,
-            executablePath: executablePath,
-            logPath: path.join(root.path, 'update.log'),
-          );
-    await script.writeAsString(contents, flush: true);
+    final appDir = File(executablePath).parent.absolute;
+    final helperDir = Directory(path.join(updateDirectory.path, 'helper'));
+    await helperDir.create(recursive: true);
+    final helper = File(path.join(helperDir.path, _helperName));
+    if (await helper.exists()) await helper.delete();
+    await File(path.join(appDir.path, _helperName)).copy(helper.path);
     if (platform != 'windows') {
-      final chmod = await _processRunner('chmod', <String>['+x', script.path]);
+      final chmod = await _processRunner('chmod', <String>['755', helper.path]);
       if (chmod.exitCode != 0) {
-        throw UpdateInstallException(
-          'Não foi possível preparar o instalador auxiliar.',
+        throw const UpdateInstallException(
+          'Não foi possível preparar o auxiliar.',
         );
       }
     }
-    _log.info('Script de atualização=${script.path}; PID=$processId');
-    if (platform == 'windows') {
-      await _detachedStarter('cmd', <String>['/c', script.path, '$processId']);
-    } else {
-      await _detachedStarter(script.path, <String>['$processId']);
+
+    final staging = Directory(
+      path.join(updateDirectory.path, 'staging-${info.tag}'),
+    );
+    await markerFile.parent.create(recursive: true);
+    await markerFile.writeAsString(
+      '${info.tag}\n${_now().toIso8601String()}\n',
+      flush: true,
+    );
+    final arguments = <String>[
+      '--finish-update',
+      '$pid',
+      appDir.path,
+      path.basename(executablePath),
+      archive.absolute.path,
+      staging.absolute.path,
+      logFile.absolute.path,
+    ];
+    _log.info('Iniciando auxiliar: pid=$pid; argumentos=$arguments');
+    try {
+      final environment = Map<String, String>.of(Platform.environment)
+        ..remove('toshiba_flashair_wifi_viewer_PRETEND_VERSION');
+      await _detachedStarter(helper.path, arguments, environment: environment);
+    } catch (error) {
+      if (await markerFile.exists()) await markerFile.delete();
+      throw UpdateInstallException(
+        'Não foi possível iniciar o auxiliar: $error',
+      );
     }
   }
 
   @override
   Future<String?> consumePreviousLog() async {
-    final root = updateDirectory;
-    final log = File(path.join(root.path, 'update.log'));
-    if (!await log.exists()) return null;
-    final result = await log.readAsString();
-    _log.info('Resultado da atualização anterior: ${result.trim()}');
-    await _deleteTree(root);
+    if (!await logFile.exists()) return null;
+    final result = await logFile.readAsString();
+    _log.info('Resultado do auxiliar: ${result.trim()}');
+    await logFile.delete();
+    if (!RegExp(r'(^|\n).*\bOK\b').hasMatch(result)) {
+      if (await markerFile.exists()) await markerFile.delete();
+    }
     return result;
   }
 
@@ -176,132 +135,33 @@ class UpdateInstaller implements UpdateInstallation {
   Future<void> openReleasePage(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null || uri.scheme != 'https') {
-      throw UpdateInstallException('Link da release inválido.');
+      throw const UpdateInstallException('Link da release inválido.');
     }
     final result = platform == 'windows'
         ? await _processRunner('cmd', <String>['/c', 'start', '', url])
         : await _processRunner('xdg-open', <String>[url]);
     if (result.exitCode != 0) {
-      throw UpdateInstallException(
+      throw const UpdateInstallException(
         'Não foi possível abrir a página da release.',
       );
     }
   }
 }
 
-String buildLinuxScript({
-  required int pid,
-  required String stagingPath,
-  required String installPath,
-  required String backupPath,
-  required String executablePath,
-  required String logPath,
-}) {
-  final staging = _shellQuote(stagingPath);
-  final install = _shellQuote(installPath);
-  final backup = _shellQuote(backupPath);
-  final executable = _shellQuote(executablePath);
-  final log = _shellQuote(logPath);
-  return '''#!/bin/sh
-PID="\${1:-$pid}"
-LOG=$log
-{
-count=0
-while kill -0 "\$PID" 2>/dev/null && [ "\$count" -lt 60 ]; do
-  sleep 1
-  count=\$((count + 1))
-done
-if kill -0 "\$PID" 2>/dev/null; then
-  echo "FAILURE: timeout esperando PID $pid"
-  RESULT=1
-elif cp -a $staging/. $install/; then
-  chmod +x $executable
-  echo "SUCCESS"
-  RESULT=0
-else
-  echo "FAILURE: cópia; restaurando backup"
-  cp -a $backup/. $install/
-  RESULT=1
-fi
-} >"\$LOG" 2>&1
-nohup $executable >/dev/null 2>&1 &
-exit "\$RESULT"
-''';
-}
+Future<ProcessResult> _runProcess(String executable, List<String> arguments) =>
+    Process.run(executable, arguments);
 
-String buildWindowsScript({
-  required int pid,
-  required String stagingPath,
-  required String installPath,
-  required String backupPath,
-  required String executablePath,
-  required String logPath,
-}) {
-  return '''@echo off
-set "PID=%~1"
-if "%PID%"=="" set "PID=$pid"
-set "LOG=${_batchValue(logPath)}"
-call :run > "%LOG%" 2>&1
-set "RESULT=%ERRORLEVEL%"
-start "" ${_batchQuote(executablePath)}
-exit /b %RESULT%
-:run
-set /a COUNT=0
-:waitloop
-tasklist /FI "PID eq %PID%" | find "%PID%" >nul
-if errorlevel 1 goto copy
-if %COUNT% GEQ 60 echo FAILURE: timeout esperando PID $pid & exit /b 1
-set /a COUNT+=1
-ping 127.0.0.1 -n 2 >nul
-goto waitloop
-:copy
-robocopy ${_batchQuote(stagingPath)} ${_batchQuote(installPath)} /E /R:2 /W:1
-if errorlevel 8 goto restore
-echo SUCCESS
-exit /b 0
-:restore
-echo FAILURE: copia; restaurando backup
-robocopy ${_batchQuote(backupPath)} ${_batchQuote(installPath)} /E /R:2 /W:1
-exit /b 1
-''';
-}
-
-String _shellQuote(String value) => "'${value.replaceAll("'", "'\"'\"'")}'";
-String _powershellQuote(String value) => "'${value.replaceAll("'", "''")}'";
-String _batchValue(String value) =>
-    value.replaceAll('%', '%%').replaceAll('"', '""');
-String _batchQuote(String value) => '"${_batchValue(value)}"';
-
-Future<ProcessResult> _runProcess(String executable, List<String> arguments) {
-  return Process.run(executable, arguments);
-}
-
-Future<Process> _startDetached(String executable, List<String> arguments) {
-  return Process.start(executable, arguments, mode: ProcessStartMode.detached);
-}
-
-Future<void> _recreate(Directory directory) async {
-  await _deleteTree(directory);
-  await directory.create(recursive: true);
-}
-
-Future<void> _deleteTree(Directory directory) async {
-  if (await directory.exists()) await directory.delete(recursive: true);
-}
-
-Future<void> _copyDirectory(Directory source, Directory destination) async {
-  await destination.create(recursive: true);
-  await for (final entity in source.list(followLinks: false)) {
-    final target = path.join(destination.path, path.basename(entity.path));
-    if (entity is Directory) {
-      await _copyDirectory(entity, Directory(target));
-    } else if (entity is File) {
-      await entity.copy(target);
-    } else if (entity is Link) {
-      await Link(target).create(await entity.target());
-    }
-  }
-}
+Future<Process> _startDetached(
+  String executable,
+  List<String> arguments, {
+  Map<String, String>? environment,
+}) => Process.start(
+  executable,
+  arguments,
+  mode: ProcessStartMode.detached,
+  environment: environment,
+  includeParentEnvironment: false,
+);
 
 class UpdateInstallException implements Exception {
   const UpdateInstallException(this.message);

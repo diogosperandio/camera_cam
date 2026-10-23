@@ -1,0 +1,9 @@
+name: ezshare_updater
+publish_to: none
+environment:
+  sdk: ^3.13.5
+dependencies:
+  archive: ^4.5.2
+  path: ^1.9.1
+dev_dependencies:
+  test: ^1.26.3

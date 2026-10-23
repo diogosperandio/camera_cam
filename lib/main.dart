@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,10 +35,15 @@ Future<void> main() async {
     fileSaver: FileSelectorFileSaver(),
     userPrompter: DialogUserPrompter(navigatorKey),
   );
-  final installer = UpdateInstaller();
+  final updateCache = await getApplicationCacheDirectory();
+  final installer = UpdateInstaller(cacheDirectory: updateCache);
   final updateController = UpdateController(
     appState: state,
-    service: UpdateService(http.Client(), repo: githubRepo),
+    service: UpdateService(
+      http.Client(),
+      repo: githubRepo,
+      cacheDirectory: updateCache,
+    ),
     installer: installer,
     requestAppClose: () async {
       await state.disconnectOnAppClose();

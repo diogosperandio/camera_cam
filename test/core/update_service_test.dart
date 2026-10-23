@@ -29,6 +29,7 @@ void main() {
           endsWith(platform == 'linux' ? '.tar.gz' : '.zip'),
         );
         expect(info?.sha256Url, endsWith('.sha256'));
+        expect(info?.digest, List<String>.filled(64, 'a').join());
       });
     }
 
@@ -50,6 +51,7 @@ void main() {
         final json = _releaseJson()..['assets'] = <Object>[];
         final service = UpdateService(
           MockClient((_) async => http.Response(jsonEncode(json), 200)),
+          repo: 'OWNER/REPO',
           platform: 'linux',
         );
         final info = await service.fetchLatest('1.0.0');
@@ -61,6 +63,7 @@ void main() {
     test('maps rate limiting and network failures', () async {
       final limited = UpdateService(
         MockClient((_) async => http.Response('API rate limit exceeded', 403)),
+        repo: 'OWNER/REPO',
         platform: 'linux',
       );
       expect(
@@ -69,6 +72,7 @@ void main() {
       );
       final offline = UpdateService(
         MockClient((_) async => throw const SocketException('offline')),
+        repo: 'OWNER/REPO',
         platform: 'linux',
       );
       expect(
@@ -80,6 +84,7 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 30));
           return http.Response('{}', 200);
         }),
+        repo: 'OWNER/REPO',
         platform: 'linux',
         fetchTimeout: const Duration(milliseconds: 1),
       );
@@ -87,6 +92,21 @@ void main() {
         timedOut.fetchLatest('1.0.0'),
         throwsA(isA<UpdateNetworkException>()),
       );
+    });
+
+    test('does not offer the same tag marked less than 24 hours ago', () async {
+      final cache = await Directory.systemTemp.createTemp('update_marker_');
+      addTearDown(() => cache.delete(recursive: true));
+      final service = UpdateService(
+        MockClient((_) async => http.Response(jsonEncode(_releaseJson()), 200)),
+        repo: 'OWNER/REPO',
+        platform: 'linux',
+        cacheDirectory: cache,
+        now: () => DateTime(2026, 10, 23, 12),
+      );
+      await service.markerFile.parent.create(recursive: true);
+      await service.markerFile.writeAsString('v1.0.3\n2026-10-23T11:00:00\n');
+      expect(await service.fetchLatest('1.0.0'), isNull);
     });
   });
 
@@ -112,6 +132,24 @@ void main() {
       );
       final file = await service.download(_info(), directory);
       expect(await file.readAsBytes(), bytes);
+    });
+
+    test('uses the API digest without requesting the checksum asset', () async {
+      final bytes = Uint8List.fromList(<int>[4, 3, 2, 1]);
+      var requests = 0;
+      final service = UpdateService(
+        MockClient((_) async {
+          requests++;
+          return http.Response.bytes(bytes, 200);
+        }),
+        platform: 'linux',
+      );
+      final file = await service.download(
+        _info(digest: sha256.convert(bytes).toString(), sha256Url: null),
+        directory,
+      );
+      expect(await file.readAsBytes(), bytes);
+      expect(requests, 1);
     });
 
     test('deletes a download with a wrong checksum', () async {
@@ -169,16 +207,18 @@ Map<String, Object> _releaseJson({String tag = 'v1.0.3'}) => <String, Object>{
   'prerelease': false,
   'assets': <Object>[
     for (final name in <String>[
-      'toshiba-flashair-wifi-viewer-v1.0.3-linux-x64.tar.gz',
-      'toshiba-flashair-wifi-viewer-v1.0.3-linux-x64.tar.gz.sha256',
-      'toshiba-flashair-wifi-viewer-v1.0.3-windows-x64.zip',
-      'toshiba-flashair-wifi-viewer-v1.0.3-windows-x64.zip.sha256',
+      'ezshare_viewer-v1.0.3-linux-x64.tar.gz',
+      'ezshare_viewer-v1.0.3-linux-x64.tar.gz.sha256',
+      'ezshare_viewer-v1.0.3-windows-x64.zip',
+      'ezshare_viewer-v1.0.3-windows-x64.zip.sha256',
     ])
       <String, Object>{
         'name': name,
         'size': 100,
         'browser_download_url':
             'https://github.com/OWNER/REPO/releases/download/v1.0.3/$name',
+        if (!name.endsWith('.sha256'))
+          'digest': 'sha256:${List<String>.filled(64, 'a').join()}',
       },
   ],
 };
@@ -188,6 +228,7 @@ UpdateInfo _info({
       'https://github.com/OWNER/REPO/releases/download/v1/update.tar.gz',
   String? sha256Url =
       'https://github.com/OWNER/REPO/releases/download/v1/update.tar.gz.sha256',
+  String? digest,
 }) => UpdateInfo(
   version: '1.0.3',
   tag: 'v1.0.3',
@@ -196,5 +237,6 @@ UpdateInfo _info({
   assetName: 'update.tar.gz',
   assetUrl: assetUrl,
   assetSize: 3,
+  digest: digest,
   sha256Url: sha256Url,
 );

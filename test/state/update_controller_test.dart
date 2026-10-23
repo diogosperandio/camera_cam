@@ -7,6 +7,7 @@ import 'package:toshiba_flashair_wifi_viewer/core/config_service.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/file_saver.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/update_installer.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/update_service.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update/install_kind.dart';
 import 'package:toshiba_flashair_wifi_viewer/core/wifi_manager.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/app_config.dart';
 import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
@@ -47,24 +48,29 @@ void main() {
     await fixture.controller.init();
 
     await fixture.controller.checkAutomatically();
-    expect(fixture.controller.status, UpdateStatus.idle);
+    expect(fixture.controller.status, UpdateStatus.available);
+    expect(fixture.controller.promptPending, isFalse);
     await fixture.controller.checkNow();
     expect(fixture.controller.status, UpdateStatus.available);
     expect(fixture.controller.availableUpdate?.version, '1.1.0');
     fixture.dispose();
   });
 
-  test('startUpdate is blocked while saving or deleting', () async {
+  test('startUpdate waits while saving and can cancel the wait', () async {
     final fixture = _Fixture();
     fixture.repository.result = _update;
     await fixture.controller.init();
     await fixture.controller.checkNow();
     fixture.state.saving = true;
 
-    await fixture.controller.startUpdate();
+    final updating = fixture.controller.startUpdate();
+    await Future<void>.delayed(Duration.zero);
 
-    expect(fixture.repository.downloadCalls, 0);
-    expect(fixture.controller.errorMessage, contains('operação com a foto'));
+    expect(fixture.repository.downloadCalls, 1);
+    expect(fixture.controller.status, UpdateStatus.waitingForTasks);
+    fixture.controller.cancelUpdate();
+    await updating;
+    expect(fixture.controller.status, UpdateStatus.available);
     fixture.dispose();
   });
 
@@ -115,6 +121,7 @@ class _Fixture {
       versionLoader: () async => '1.0.0+2',
       initialDelay: const Duration(days: 1),
       disconnectDelay: disconnectDelay,
+      repo: 'OWNER/REPO',
     );
   }
 
@@ -160,14 +167,13 @@ class _Installer implements UpdateInstallation {
   @override
   Directory get updateDirectory => Directory.systemTemp;
   @override
-  Future<({bool ok, String? reason})> canInstall() async =>
-      (ok: true, reason: null);
+  Future<InstallDetection> detect() async => (InstallKind.portable, null);
   @override
   Future<String?> consumePreviousLog() async => null;
   @override
   Future<void> openReleasePage(String url) async {}
   @override
-  Future<void> prepareAndLaunch(File archive) async {}
+  Future<void> install(UpdateInfo info, File archive) async {}
 }
 
 class _MemoryConfigService extends ConfigService {

@@ -8,11 +8,35 @@ on:
 permissions:
   contents: write
 
+# Uma release por vez para a mesma tag (evita duas execuções concorrentes).
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # Prefixo dos arquivos publicados. O atualizador do app procura exatamente:
+  #   <APP_SLUG>-vX.Y.Z-linux-x64.tar.gz   e   <APP_SLUG>-vX.Y.Z-windows-x64.zip
+  APP_SLUG: toshiba_flashair_wifi_viewer
+  # Nome do auxiliar de atualização (Etapa 17).
+  UPDATER_NAME: toshiba_flashair_wifi_viewer_updater
+  PORTABLE_TEXT: "Instalação portátil do Toshiba FlashAir Wifi Viewer. Não apague: permite a atualização automática."
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Evita o loop "atualiza, reinicia, oferece de novo": a versão do app
+      # (pubspec.yaml) precisa ser a mesma da tag.
+      - name: Conferir versão do pubspec.yaml com a tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pub="$(grep -E '^version:' pubspec.yaml | head -n1 | sed -E 's/^version:[[:space:]]*//; s/\+.*$//' | tr -d '[:space:]\r')"
+          if [ "$tag" != "$pub" ]; then
+            echo "::error::A tag é v$tag, mas o pubspec.yaml diz $pub. Use o release.sh para lançar."
+            exit 1
+          fi
 
       - name: Extrair notas do CHANGELOG.md
         run: |
@@ -26,63 +50,107 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          title="Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME"
           if grep -q '[^[:space:]]' notes.md; then
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME" --notes-file notes.md --draft
+              --title "$title" --notes-file notes.md --draft
           else
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "Toshiba FlashAir Wifi Viewer $GITHUB_REF_NAME" --generate-notes --draft
+              --title "$title" --generate-notes --draft
           fi
 
   build-linux:
     needs: create-release
     runs-on: ubuntu-latest
+    env:
+      BUNDLE: build/linux/x64/release/bundle
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       - name: Dependências do Linux
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+
       - run: flutter pub get
       - run: flutter test
-      - run: flutter build linux --release
+
+      - name: Compilar o app
+        run: flutter build linux --release --dart-define=GITHUB_REPO=${{ github.repository }}
+
+      - name: Compilar o auxiliar de atualização
+        run: |
+          dart pub get --directory tool/updater
+          (cd tool/updater && dart test)
+          dart compile exe tool/updater/bin/updater.dart -o "$BUNDLE/$UPDATER_NAME"
+          chmod 755 "$BUNDLE/$UPDATER_NAME"
+
+      - name: Marcar como instalação portátil
+        run: printf '%s\n' "$PORTABLE_TEXT" > "$BUNDLE/portable.txt"
+
       - name: Empacotar
-        run: tar -czf toshiba-flashair-wifi-viewer-${{ github.ref_name }}-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+        run: |
+          ARQ="$APP_SLUG-$GITHUB_REF_NAME-linux-x64.tar.gz"
+          tar -czf "$ARQ" -C "$BUNDLE" .
+          sha256sum "$ARQ" > "$ARQ.sha256"
+          echo "ARQ=$ARQ" >> "$GITHUB_ENV"
+
       - name: Anexar à release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          ARQ="toshiba-flashair-wifi-viewer-${{ github.ref_name }}-linux-x64.tar.gz"
-          sha256sum "$ARQ" > "$ARQ.sha256"
-          gh release upload "${{ github.ref_name }}" "$ARQ" "$ARQ.sha256" --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "$ARQ" "$ARQ.sha256" --repo "$GITHUB_REPOSITORY" --clobber
 
   build-windows:
     needs: create-release
     runs-on: windows-latest
+    env:
+      BUNDLE: build\windows\x64\runner\Release
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       - run: flutter pub get
-      - run: flutter build windows --release
+
+      - name: Compilar o app
+        run: flutter build windows --release --dart-define=GITHUB_REPO=${{ github.repository }}
+
+      - name: Compilar o auxiliar de atualização
+        shell: pwsh
+        run: |
+          dart pub get --directory tool/updater
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location tool/updater
+          dart test
+          Pop-Location
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dart compile exe tool/updater/bin/updater.dart -o "$env:BUNDLE\$env:UPDATER_NAME.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Marcar como instalação portátil
+        shell: pwsh
+        run: Set-Content -Path "$env:BUNDLE\portable.txt" -Value $env:PORTABLE_TEXT -Encoding utf8
+
       - name: Empacotar
         shell: pwsh
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath toshiba-flashair-wifi-viewer-${{ github.ref_name }}-windows-x64.zip
+        run: |
+          $zip = "$env:APP_SLUG-$env:GITHUB_REF_NAME-windows-x64.zip"
+          Compress-Archive -Path "$env:BUNDLE\*" -DestinationPath $zip -Force
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$h  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          "ZIP=$zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
       - name: Anexar à release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $zip = "toshiba-flashair-wifi-viewer-${{ github.ref_name }}-windows-x64.zip"
-          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$h  $zip" | Out-File -Encoding ascii "$zip.sha256"
-          gh release upload "${{ github.ref_name }}" "$zip" "$zip.sha256" --clobber
+        run: gh release upload "$env:GITHUB_REF_NAME" "$env:ZIP" "$env:ZIP.sha256" --repo "$env:GITHUB_REPOSITORY" --clobber
 
   publish:
     needs: [build-linux, build-windows]
@@ -91,4 +159,4 @@ jobs:
       - name: Publicar release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

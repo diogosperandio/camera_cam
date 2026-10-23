@@ -39,14 +39,6 @@ class CameraToolbar extends StatelessWidget {
           icon: const Icon(Icons.wifi_off),
           label: const Text('Desconectar'),
         ),
-        if (updateController?.status == UpdateStatus.available)
-          ActionChip(
-            avatar: const Icon(Icons.system_update, size: 18),
-            label: Text(
-              'Atualização v${updateController!.availableUpdate!.version}',
-            ),
-            onPressed: onOpenUpdate,
-          ),
         OutlinedButton.icon(
           onPressed: onRefresh,
           icon: const Icon(Icons.refresh),

@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
-import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
-import 'package:toshiba_flashair_wifi_viewer/core/version_utils.dart';
-import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
+import 'package:toshiba_flashair_wifi_viewer/core/app_constants.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/version_utils.dart';
+import 'package:toshiba_flashair_wifi_viewer/models/update_info.dart';
 
 typedef UpdateProgress = void Function(int received, int? total);
 typedef UpdatePhaseCallback = void Function();
@@ -35,16 +36,26 @@ class UpdateService implements UpdateRepository {
     this.client, {
     this.repo = githubRepo,
     String? platform,
+    Directory? cacheDirectory,
     this.fetchTimeout = const Duration(seconds: 10),
     this.downloadTimeout = const Duration(minutes: 5),
-  }) : platform = platform ?? Platform.operatingSystem;
+    DateTime Function()? now,
+  }) : platform = platform ?? Platform.operatingSystem,
+       cacheDirectory = cacheDirectory ?? Directory.systemTemp,
+       _now = now ?? DateTime.now;
 
   final http.Client client;
   final String repo;
   final String platform;
+  final Directory cacheDirectory;
   final Duration fetchTimeout;
   final Duration downloadTimeout;
+  final DateTime Function() _now;
   final Logger _log = Logger('UpdateService');
+
+  File get markerFile => File(
+    path.join(cacheDirectory.path, 'updates', 'data', 'just_updated.txt'),
+  );
 
   @override
   Future<UpdateInfo?> fetchLatest(String currentVersion) async {
@@ -52,6 +63,7 @@ class UpdateService implements UpdateRepository {
     if (current == null) {
       throw const UpdateHttpException('A versão instalada é inválida.');
     }
+    if (repo.trim().isEmpty) return null;
     final uri = Uri.parse('https://api.github.com/repos/$repo/releases/latest');
     try {
       final response = await client
@@ -65,39 +77,50 @@ class UpdateService implements UpdateRepository {
         throw const UpdateHttpException('Resposta inválida do GitHub.');
       }
       final tag = decoded['tag_name'] as String? ?? '';
-      final latest = parseVersion(tag);
-      if (latest == null || compareVersions(latest, current) <= 0) return null;
+      if (!RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(tag)) return null;
+      final latest = parseVersion(tag)!;
+      if (compareVersions(latest, current) <= 0 ||
+          await _recentlyInstalled(tag)) {
+        return null;
+      }
 
-      final version = latest.toString();
       final expectedName = switch (platform) {
-        'linux' => 'toshiba-flashair-wifi-viewer-v$version-linux-x64.tar.gz',
-        'windows' => 'toshiba-flashair-wifi-viewer-v$version-windows-x64.zip',
+        'linux' => 'toshiba_flashair_wifi_viewer-$tag-linux-x64.tar.gz',
+        'windows' => 'toshiba_flashair_wifi_viewer-$tag-windows-x64.zip',
         _ => '',
       };
       Map<String, dynamic>? asset;
       Map<String, dynamic>? checksum;
-      final assets = decoded['assets'];
-      if (assets is List) {
-        for (final candidate in assets.whereType<Map<String, dynamic>>()) {
-          if (candidate['name'] == expectedName) asset = candidate;
-          if (candidate['name'] == '$expectedName.sha256') checksum = candidate;
-        }
+      for (final candidate
+          in (decoded['assets'] as List? ?? const <Object>[])
+              .whereType<Map<String, dynamic>>()) {
+        if (candidate['name'] == expectedName) asset = candidate;
+        if (candidate['name'] == '$expectedName.sha256') checksum = candidate;
       }
-      final notes = decoded['body'] as String? ?? '';
+      final digestValue = asset?['digest'] as String?;
+      final digest =
+          digestValue != null &&
+              RegExp(r'^sha256:[a-fA-F0-9]{64}$').hasMatch(digestValue)
+          ? digestValue.substring(7).toLowerCase()
+          : null;
+      final plainNotes = _plainText(decoded['body'] as String? ?? '');
       final info = UpdateInfo(
-        version: version,
+        version: latest.toString(),
         tag: tag,
-        notes: notes.length > 2000 ? notes.substring(0, 2000) : notes,
+        notes: plainNotes.length > 2000
+            ? plainNotes.substring(0, 2000)
+            : plainNotes,
         pageUrl:
             decoded['html_url'] as String? ??
             'https://github.com/$repo/releases',
         assetName: expectedName,
         assetUrl: asset?['browser_download_url'] as String?,
         assetSize: (asset?['size'] as num?)?.toInt() ?? 0,
+        digest: digest,
         sha256Url: checksum?['browser_download_url'] as String?,
       );
       _log.info(
-        'Release ${info.tag}: asset=${info.assetName}; tamanho=${info.assetSize}',
+        'Release $tag: asset=$expectedName; tamanho=${info.assetSize}; digest=${digest != null}',
       );
       return info;
     } on UpdateException {
@@ -122,10 +145,12 @@ class UpdateService implements UpdateRepository {
     UpdatePhaseCallback? onVerifying,
   }) async {
     final assetUri = _trustedUri(info.assetUrl);
-    if (info.sha256Url == null) {
-      throw const UpdateIntegrityException('release sem checksum');
+    if (info.digest == null && info.sha256Url == null) {
+      throw const UpdateIntegrityException('a release não publica checksum');
     }
-    final checksumUri = _trustedUri(info.sha256Url);
+    final checksumUri = info.digest == null
+        ? _trustedUri(info.sha256Url)
+        : null;
     await directory.create(recursive: true);
     final target = File(path.join(directory.path, info.assetName));
     final partial = File('${target.path}.part');
@@ -153,13 +178,28 @@ class UpdateService implements UpdateRepository {
   Future<File> _downloadAndVerify(
     UpdateInfo info,
     Uri assetUri,
-    Uri checksumUri,
+    Uri? checksumUri,
     File target,
     File partial,
     UpdateProgress? onProgress,
     UpdateCancelToken? cancelToken,
     UpdatePhaseCallback? onVerifying,
   ) async {
+    String expected;
+    var source = 'digest';
+    if (info.digest case final digest?) {
+      expected = digest;
+    } else {
+      source = '.sha256';
+      final response = await _get(checksumUri!);
+      final tokens = response.body.trim().split(RegExp(r'\s+'));
+      final token = tokens.isEmpty ? '' : tokens.first;
+      if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(token)) {
+        throw const UpdateIntegrityException('checksum inválido na release');
+      }
+      expected = token.toLowerCase();
+    }
+
     await _deleteIfPresent(partial);
     final request = http.Request('GET', assetUri)..headers.addAll(_headers);
     http.StreamedResponse response;
@@ -171,8 +211,7 @@ class UpdateService implements UpdateRepository {
       throw UpdateNetworkException(error);
     }
     if (response.statusCode != 200) {
-      final body = await response.stream.bytesToString();
-      _throwHttp(response.statusCode, body);
+      _throwHttp(response.statusCode, await response.stream.bytesToString());
     }
     final sink = partial.openWrite();
     var received = 0;
@@ -197,33 +236,20 @@ class UpdateService implements UpdateRepository {
     final downloaded = await partial.rename(target.path);
     onVerifying?.call();
     if (cancelToken?.isCancelled ?? false) {
-      throw const UpdateCancelledException();
-    }
-
-    http.Response checksumResponse;
-    try {
-      checksumResponse = await client.get(checksumUri, headers: _headers);
-    } on SocketException catch (error) {
-      throw UpdateNetworkException(error);
-    } on http.ClientException catch (error) {
-      throw UpdateNetworkException(error);
-    }
-    if (checksumResponse.statusCode != 200) {
-      _throwHttp(checksumResponse.statusCode, checksumResponse.body);
-    }
-    if (cancelToken?.isCancelled ?? false) {
-      throw const UpdateCancelledException();
-    }
-    final match = RegExp(r'^\s*([a-fA-F0-9]{64})(?:\s|$)')
-        .firstMatch(checksumResponse.body);
-    if (match == null) {
       await _deleteIfPresent(downloaded);
-      throw const UpdateIntegrityException('checksum inválido na release');
+      throw const UpdateCancelledException();
     }
-    final expected = match.group(1)!.toLowerCase();
-    final calculated = (await sha256.bind(downloaded.openRead()).first)
-        .toString();
-    _log.info('SHA-256 esperado=$expected; calculado=$calculated');
+    final calculated = await Isolate.run(
+      () async => (await sha256.bind(File(downloaded.path).openRead()).first)
+          .toString(),
+    );
+    _log.info(
+      'SHA-256 origem=$source; esperado=$expected; calculado=$calculated',
+    );
+    if (cancelToken?.isCancelled ?? false) {
+      await _deleteIfPresent(downloaded);
+      throw const UpdateCancelledException();
+    }
     if (expected != calculated) {
       await _deleteIfPresent(downloaded);
       throw const UpdateIntegrityException(
@@ -233,15 +259,43 @@ class UpdateService implements UpdateRepository {
     return downloaded;
   }
 
+  Future<http.Response> _get(Uri uri) async {
+    try {
+      final response = await client.get(uri, headers: _headers);
+      if (response.statusCode != 200) {
+        _throwHttp(response.statusCode, response.body);
+      }
+      return response;
+    } on SocketException catch (error) {
+      throw UpdateNetworkException(error);
+    } on http.ClientException catch (error) {
+      throw UpdateNetworkException(error);
+    }
+  }
+
+  Future<bool> _recentlyInstalled(String tag) async {
+    if (!await markerFile.exists()) return false;
+    try {
+      final lines = await markerFile.readAsLines();
+      final timestamp = lines.length > 1 ? DateTime.tryParse(lines[1]) : null;
+      return lines.isNotEmpty &&
+          lines.first == tag &&
+          timestamp != null &&
+          _now().difference(timestamp) < const Duration(hours: 24);
+    } catch (_) {
+      return false;
+    }
+  }
+
   Uri _trustedUri(String? value) {
     final uri = Uri.tryParse(value ?? '');
     final host = uri?.host.toLowerCase() ?? '';
-    if (uri == null ||
-        uri.scheme != 'https' ||
-        !(host == 'github.com' ||
-            host.endsWith('.github.com') ||
-            host == 'githubusercontent.com' ||
-            host.endsWith('.githubusercontent.com'))) {
+    final trusted =
+        host == 'github.com' ||
+        host == 'objects.githubusercontent.com' ||
+        host == 'release-assets.githubusercontent.com' ||
+        host.endsWith('.githubusercontent.com');
+    if (uri == null || uri.scheme != 'https' || !trusted) {
       throw const UpdateIntegrityException('URL de atualização não confiável.');
     }
     return uri;
@@ -258,9 +312,15 @@ class UpdateService implements UpdateRepository {
   Map<String, String> get _headers => const <String, String>{
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'toshiba-flashair-wifi-viewer-update-client',
+    'User-Agent': 'Toshiba Flashair WiFi Viewer',
   };
 }
+
+String _plainText(String value) => value
+    .replaceAll(RegExp(r'<[^>]*>'), '')
+    .replaceAll(RegExp(r'^[#>*+-]+\s*', multiLine: true), '')
+    .replaceAll(RegExp(r'\[([^\]]+)\]\([^\)]+\)'), r'$1')
+    .trim();
 
 Future<void> _deleteIfPresent(File file) async {
   if (await file.exists()) await file.delete();

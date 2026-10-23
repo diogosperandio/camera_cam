@@ -7,6 +7,7 @@ class UpdateInfo {
     required this.assetName,
     required this.assetSize,
     this.assetUrl,
+    this.digest,
     this.sha256Url,
   });
 
@@ -17,5 +18,6 @@ class UpdateInfo {
   final String assetName;
   final String? assetUrl;
   final int assetSize;
+  final String? digest;
   final String? sha256Url;
 }

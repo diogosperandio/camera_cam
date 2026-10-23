@@ -7,6 +7,7 @@ import 'package:toshiba_flashair_wifi_viewer/ui/file_tree.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:toshiba_flashair_wifi_viewer/core/update/install_kind.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({this.updateController, super.key});
@@ -217,14 +218,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Verificar atualizações automaticamente'),
+                  title: const Text('Verificar atualizações ao abrir'),
                   value: _autoCheckUpdates,
                   onChanged: (value) =>
                       setState(() => _autoCheckUpdates = value),
                 ),
-                Text(
-                  'Versão instalada: ${widget.updateController?.currentVersion ?? '—'}',
-                ),
+                Text(_installedVersionText(widget.updateController)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -582,6 +581,15 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _settingsSaved = true;
     Navigator.of(context).pop();
   }
+}
+
+String _installedVersionText(UpdateController? controller) {
+  if (controller == null) return 'Versão instalada: —';
+  final detection = controller.installDetection;
+  final kind = detection.kind == InstallKind.portable
+      ? 'portátil'
+      : 'atualização automática indisponível: ${detection.reason}';
+  return 'Versão instalada: ${controller.currentVersion} ($kind)';
 }
 
 String? validateBaseUrl(String? value) {

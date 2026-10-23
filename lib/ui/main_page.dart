@@ -32,6 +32,7 @@ class _MainPageState extends State<MainPage> {
   AppState? _state;
   String? _lastShownError;
   String? _lastFailedPath;
+  bool _updateDialogOpen = false;
 
   @override
   void didChangeDependencies() {
@@ -57,6 +58,12 @@ class _MainPageState extends State<MainPage> {
     final message = controller?.previousUpdateFailure;
     if (!mounted) return;
     setState(() {});
+    if (controller?.promptPending == true && !_updateDialogOpen) {
+      controller!.markPromptShown();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openUpdate();
+      });
+    }
     if (message == null) return;
     controller!.previousUpdateFailure = null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,12 +138,16 @@ class _MainPageState extends State<MainPage> {
 
   void _openUpdate() {
     final controller = widget.updateController;
-    if (controller == null) return;
+    if (controller == null ||
+        controller.availableUpdate == null ||
+        _updateDialogOpen) {
+      return;
+    }
+    _updateDialogOpen = true;
     showDialog<void>(
       context: context,
-      barrierDismissible: false,
       builder: (_) => UpdateDialog(controller: controller),
-    );
+    ).whenComplete(() => _updateDialogOpen = false);
   }
 
   @override
@@ -193,6 +204,8 @@ class _MainPageState extends State<MainPage> {
                 updateController: widget.updateController,
                 onOpenUpdate: _openUpdate,
               ),
+              if (widget.updateController case final controller?)
+                UpdateBanner(controller: controller, onOpenUpdate: _openUpdate),
               const Divider(height: 1),
               Expanded(child: _buildBody(state, ssid)),
             ],
