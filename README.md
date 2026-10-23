@@ -3,19 +3,32 @@
 Aplicativo desktop para Linux e Windows que navega, visualiza, salva e gerencia
 fotos de uma câmera com cartão Wi-Fi Toshiba FlashAir.
 
-## Getting Started
+## Funcionalidades
 
-This project is a starting point for a Flutter application.
+- Conecta e desconecta o computador da rede Wi-Fi do cartão FlashAir.
+- Navega pelas pastas e fotos do cartão em uma árvore com miniaturas.
+- Visualiza as fotos em tamanho ampliado, com controles de zoom e ajuste à tela.
+- Salva a foto selecionada em uma pasta do computador.
+- Permite configurar a rede Wi-Fi, a URL do cartão e a pasta de destino.
+- Pode apagar fotos e pastas vazias, quando o recurso estiver habilitado, sempre
+  mediante confirmação.
+- Verifica atualizações do aplicativo e orienta a instalação de novas versões.
+- Oferece configuração para manter o acesso à internet por Ethernet enquanto o
+  Wi-Fi é usado apenas para comunicação com o cartão.
 
-A few resources to get you started if this is your first Flutter project:
+## Capturas de tela
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### Conexão com o cartão
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+![Conexão com a rede Wi-Fi do cartão FlashAir](assets/Screenshot%20from%202026-10-22%2009-34-40.png)
+
+### Navegação pelas pastas
+
+![Árvore de pastas do cartão FlashAir](assets/Screenshot%20from%202026-10-22%2009-35-03.png)
+
+### Visualização da foto
+
+![Visualização, download e exclusão de uma foto](assets/Screenshot%20from%202026-10-22%2009-35-09.png)
 
 ## Apagar pastas vazias
 
