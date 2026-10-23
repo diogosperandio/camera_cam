@@ -2,6 +2,11 @@
 
 Todas as mudanças notáveis deste projeto ficam neste arquivo.
 
+## [1.0.8] - 2026-10-23
+
+### Alterações
+- Change snackbar color
+
 ## [1.0.7] - 2026-10-23
 
 ### Alterações
